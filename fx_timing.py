@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """
 USD/BRL Exchange Timing Model
-  python fx_timing.py             — live signal analysis
-  python fx_timing.py --backtest  — walk-forward backtest (2nd & 17th since 2022)
+  python fx_timing.py                  — live signal analysis
+  python fx_timing.py --lang pt        — saída em português
+  python fx_timing.py --backtest       — walk-forward backtest (2nd & 17th since 2022)
 
 pip install yfinance pandas numpy
 """
@@ -22,6 +23,145 @@ import yfinance as yf
 from signals import Signal, build_signals
 
 warnings.filterwarnings("ignore")
+
+# ── i18n ──────────────────────────────────────────────────────────────────────
+_LANG: str = "en"  # overridden from --lang arg in main()
+
+
+def _t(key: str) -> str:
+    return _STRINGS.get(_LANG, _STRINGS["en"]).get(key, _STRINGS["en"].get(key, key))
+
+
+_STRINGS: dict[str, dict[str, str]] = {
+    "en": {
+        "title": "USD → BRL   EXCHANGE TIMING MODEL",
+        "trend_regime": "Trend Regime",
+        "signals_header": "SIGNALS",
+        "signals_cols": "← WAIT   NOW →   score    wt",
+        "lbl_now": "NOW ",
+        "lbl_wait": "WAIT",
+        "lbl_flat": "FLAT",
+        "prob_title": "PROBABILITY DISTRIBUTION",
+        "prob_now": "Exchange Now",
+        "prob_split": "Split 50/50",
+        "prob_wait": "Wait",
+        "stat_line": "Composite: {comp:+.3f}   Agreement: {agree:.0%}   Regime adj: {regime:+.2f}",
+        "time_title": "Time horizon note:",
+        "time_7d": "  < 7 days   execute regardless — timing models don't help at this horizon",
+        "time_30d": "  7–30 days  the signal above is most relevant in this window",
+        "time_long": "  > 30 days  consider weighting WAIT more; more time = more optionality",
+        "disc1": "Past signal accuracy is no guarantee of future results.",
+        "disc2": "This tool does not constitute financial or investment advice.",
+        # regime
+        "regime_sup": "sustained uptrend detected  (BRL weakening trend — NOW signals suppressed)",
+        "regime_mup": "mild uptrend  (slight WAIT bias applied)",
+        "regime_sdn": "sustained downtrend detected  (BRL strengthening trend — WAIT signals suppressed)",
+        "regime_mdn": "mild downtrend  (slight NOW bias applied)",
+        "regime_rng": "no clear trend  (mean-reversion signals fully active)",
+        # verdict — exchange now
+        "vn_hi_h": "signals lean toward exchanging now",
+        "vn_hi_s": (
+            "Multiple indicators suggest the current rate may be near a local high. "
+            "This is not a guarantee — past signal accuracy has been ~52 % on this call."
+        ),
+        "vn_md_h": "signals moderately suggest considering an exchange",
+        "vn_md_s": (
+            "Some indicators point to the current rate being relatively favourable. "
+            "Confidence is moderate — splitting (50 % now, 50 % later) is a reasonable alternative."
+        ),
+        "vn_lo_h": "signals weakly lean toward exchanging now",
+        "vn_lo_s": (
+            "The balance of indicators tilts slightly toward now, but conviction is low. "
+            "Splitting or waiting are equally defensible choices."
+        ),
+        # verdict — wait
+        "vw_hi_h": "signals lean toward waiting",
+        "vw_hi_s": (
+            "Multiple indicators suggest a better rate may become available. "
+            "This is not a guarantee — the WAIT signal historically performs near 44 %."
+        ),
+        "vw_md_h": "signals moderately suggest waiting",
+        "vw_md_s": (
+            "Some indicators point to continued USD strength. "
+            "Confidence is moderate — if you have a deadline within 7 days, execute regardless."
+        ),
+        "vw_lo_h": "signals weakly lean toward waiting",
+        "vw_lo_s": (
+            "The balance of indicators tilts slightly toward waiting, but conviction is low. "
+            "Splitting (50 % now, 50 % later) may be the most prudent path."
+        ),
+        # verdict — split
+        "vs_h": "signals are inconclusive — consider splitting",
+        "vs_s": (
+            "Indicators are mixed with no clear directional conviction. "
+            "Exchanging 50 % now and 50 % later reduces timing regret without requiring a call."
+        ),
+    },
+    "pt": {
+        "title": "USD → BRL   MODELO DE TIMING DE CÂMBIO",
+        "trend_regime": "Regime de Tendência",
+        "signals_header": "SINAIS",
+        "signals_cols": "← AGUARDAR  AGORA →   score    peso",
+        "lbl_now": "AGORA",
+        "lbl_wait": "AGU.",
+        "lbl_flat": "NEUT",
+        "prob_title": "DISTRIBUIÇÃO DE PROBABILIDADE",
+        "prob_now": "Câmbio Agora",
+        "prob_split": "Dividir 50/50",
+        "prob_wait": "Aguardar",
+        "stat_line": "Composto: {comp:+.3f}   Concordância: {agree:.0%}   Ajuste regime: {regime:+.2f}",
+        "time_title": "Horizonte de tempo:",
+        "time_7d": "  < 7 dias     execute independente — modelos de timing não ajudam nesse prazo",
+        "time_30d": "  7–30 dias    o sinal acima é mais relevante nessa janela",
+        "time_long": "  > 30 dias    considere dar mais peso ao AGUARDAR; mais tempo = mais opcionalidade",
+        "disc1": "A acurácia histórica do modelo não garante resultados futuros.",
+        "disc2": "Esta ferramenta não constitui aconselhamento financeiro ou de investimento.",
+        # regime
+        "regime_sup": "tendência de alta sustentada  (BRL enfraquecendo — sinais de AGORA suprimidos)",
+        "regime_mup": "leve tendência de alta  (viés sutil para AGUARDAR aplicado)",
+        "regime_sdn": "tendência de baixa sustentada  (BRL fortalecendo — sinais de AGUARDAR suprimidos)",
+        "regime_mdn": "leve tendência de baixa  (viés sutil para AGORA aplicado)",
+        "regime_rng": "sem tendência clara  (sinais de reversão à média totalmente ativos)",
+        # verdict — câmbio agora
+        "vn_hi_h": "os sinais indicam uma possível oportunidade de câmbio agora",
+        "vn_hi_s": (
+            "Múltiplos indicadores sugerem que a taxa atual pode estar próxima de uma máxima local. "
+            "Isso não é garantia — a acurácia histórica deste sinal foi de ~52 %."
+        ),
+        "vn_md_h": "os sinais sugerem moderadamente considerar o câmbio agora",
+        "vn_md_s": (
+            "Alguns indicadores apontam para uma taxa atual relativamente favorável. "
+            "A confiança é moderada — dividir (50 % agora, 50 % depois) é uma alternativa razoável."
+        ),
+        "vn_lo_h": "os sinais apontam fracamente para câmbio agora",
+        "vn_lo_s": (
+            "O equilíbrio de indicadores inclina-se levemente para agora, mas a convicção é baixa. "
+            "Dividir ou aguardar são escolhas igualmente defensáveis."
+        ),
+        # verdict — aguardar
+        "vw_hi_h": "os sinais indicam uma possível vantagem em aguardar",
+        "vw_hi_s": (
+            "Múltiplos indicadores sugerem que uma taxa melhor pode estar disponível. "
+            "Isso não é garantia — o sinal de AGUARDAR historicamente tem ~44 % de acurácia."
+        ),
+        "vw_md_h": "os sinais sugerem moderadamente aguardar",
+        "vw_md_s": (
+            "Alguns indicadores apontam para continuidade do fortalecimento do dólar. "
+            "Se tiver prazo em menos de 7 dias, execute independentemente."
+        ),
+        "vw_lo_h": "os sinais apontam fracamente para aguardar",
+        "vw_lo_s": (
+            "O equilíbrio de indicadores inclina-se levemente para aguardar, mas a convicção é baixa. "
+            "Dividir (50 % agora, 50 % depois) pode ser o caminho mais prudente."
+        ),
+        # verdict — dividir
+        "vs_h": "os sinais são inconclusivos — considere dividir a operação",
+        "vs_s": (
+            "Os indicadores estão mistos sem convicção direcional clara. "
+            "Fazer câmbio de 50 % agora e 50 % depois reduz o arrependimento de timing sem exigir uma decisão definitiva."
+        ),
+    },
+}
 
 # ── Config ────────────────────────────────────────────────────────────────────
 LIVE_FETCH_DAYS = 180
@@ -247,16 +387,14 @@ def sbar(score: float, half: int = 8) -> str:
 
 def regime_label(regime: float) -> str:
     if regime > 0.6:
-        return (
-            "sustained uptrend detected  (BRL weakening trend — NOW signals suppressed)"
-        )
+        return _t("regime_sup")
     if regime > 0.15:
-        return "mild uptrend  (slight WAIT bias applied)"
+        return _t("regime_mup")
     if regime < -0.6:
-        return "sustained downtrend detected  (BRL strengthening trend — WAIT signals suppressed)"
+        return _t("regime_sdn")
     if regime < -0.15:
-        return "mild downtrend  (slight NOW bias applied)"
-    return "no clear trend  (mean-reversion signals fully active)"
+        return _t("regime_mdn")
+    return _t("regime_rng")
 
 
 def _verdict(d: str, pn: float, pw: float) -> tuple[str, str, str]:
@@ -267,55 +405,19 @@ def _verdict(d: str, pn: float, pw: float) -> tuple[str, str, str]:
     """
     if d == "exchange_now":
         if pn > 0.70:
-            headline = "signals lean toward exchanging now"
-            sub = (
-                "Multiple indicators suggest the current rate may be near a local high. "
-                "This is not a guarantee — past signal accuracy has been ~52 % on this call."
-            )
-        elif pn > 0.57:
-            headline = "signals moderately suggest considering an exchange"
-            sub = (
-                "Some indicators point to the current rate being relatively favourable. "
-                "Confidence is moderate — splitting (50 % now, 50 % later) is a reasonable alternative."
-            )
-        else:
-            headline = "signals weakly lean toward exchanging now"
-            sub = (
-                "The balance of indicators tilts slightly toward now, but conviction is low. "
-                "Splitting or waiting are equally defensible choices."
-            )
-        return "◈", headline, sub
+            return "◈", _t("vn_hi_h"), _t("vn_hi_s")
+        if pn > 0.57:
+            return "◈", _t("vn_md_h"), _t("vn_md_s")
+        return "◈", _t("vn_lo_h"), _t("vn_lo_s")
 
     if d == "wait":
         if pw > 0.70:
-            headline = "signals lean toward waiting"
-            sub = (
-                "Multiple indicators suggest a better rate may become available. "
-                "This is not a guarantee — the WAIT signal historically performs near 44 %."
-            )
-        elif pw > 0.57:
-            headline = "signals moderately suggest waiting"
-            sub = (
-                "Some indicators point to continued USD strength. "
-                "Confidence is moderate — if you have a deadline within 7 days, execute regardless."
-            )
-        else:
-            headline = "signals weakly lean toward waiting"
-            sub = (
-                "The balance of indicators tilts slightly toward waiting, but conviction is low. "
-                "Splitting (50 % now, 50 % later) may be the most prudent path."
-            )
-        return "◷", headline, sub
+            return "◷", _t("vw_hi_h"), _t("vw_hi_s")
+        if pw > 0.57:
+            return "◷", _t("vw_md_h"), _t("vw_md_s")
+        return "◷", _t("vw_lo_h"), _t("vw_lo_s")
 
-    # split
-    return (
-        "◫",
-        "signals are inconclusive — consider splitting",
-        (
-            "Indicators are mixed with no clear directional conviction. "
-            "Exchanging 50 % now and 50 % later reduces timing regret without requiring a call."
-        ),
-    )
+    return "◫", _t("vs_h"), _t("vs_s")
 
 
 def render_live(signals: list[Signal], probs: dict) -> None:
@@ -325,7 +427,7 @@ def render_live(signals: list[Signal], probs: dict) -> None:
 
     print()
     print("═" * W)
-    print("  USD → BRL   EXCHANGE TIMING MODEL")
+    print(f"  {_t('title')}")
     print(
         f"  {datetime.now().strftime('%Y-%m-%d  %H:%M')}"
         + (f"   ·   R$ {rate:.4f}" if rate else "")
@@ -333,32 +435,38 @@ def render_live(signals: list[Signal], probs: dict) -> None:
     print("═" * W)
 
     print()
-    print(f"  Trend Regime:  {regime_label(regime)}")
+    print(f"  {_t('trend_regime')}:  {regime_label(regime)}")
     print()
-    print("  SIGNALS" + " " * 22 + "← WAIT   NOW →   score    wt")
+    cols = _t("signals_cols")
+    pad = max(0, 30 - len(_t("signals_header")))
+    print(f"  {_t('signals_header')}" + " " * pad + cols)
     print("  " + "─" * (W - 2))
     print()
 
     for s in signals:
-        v = "NOW " if s.score > 0.15 else "WAIT" if s.score < -0.15 else "FLAT"
-        print(f"  {s.name:<18} {sbar(s.score)}  {s.score:+.2f}  {s.weight:.0%}  [{v}]")
+        score = s.score
+        if score > 0.15:
+            v = _t("lbl_now")
+        elif score < -0.15:
+            v = _t("lbl_wait")
+        else:
+            v = _t("lbl_flat")
+        print(f"  {s.name:<18} {sbar(score)}  {score:+.2f}  {s.weight:.0%}  [{v}]")
         print(f"    {s.note}")
         print()
 
     comp = probs["composite"]
     agree = probs["agreement"]
-    print(
-        f"  Composite: {comp:+.3f}   Agreement: {agree:.0%}   Regime adj: {regime:+.2f}"
-    )
+    print("  " + _t("stat_line").format(comp=comp, agree=agree, regime=regime))
 
     print()
-    print("  PROBABILITY DISTRIBUTION")
+    print(f"  {_t('prob_title')}")
     print("  " + "─" * (W - 2))
     print()
     for label, key in [
-        ("Exchange Now", "exchange_now"),
-        ("Split 50/50", "split"),
-        ("Wait", "wait"),
+        (_t("prob_now"), "exchange_now"),
+        (_t("prob_split"), "split"),
+        (_t("prob_wait"), "wait"),
     ]:
         p = probs[key]
         print(f"  {label:<13}  {p:>5.1%}  [{pbar(p)}]")
@@ -384,15 +492,13 @@ def render_live(signals: list[Signal], probs: dict) -> None:
         print(f"     {line_buf.rstrip()}")
 
     print()
-    print("  Time horizon note:")
-    print(
-        "    < 7 days   execute regardless — timing models don't help at this horizon"
-    )
-    print("    7–30 days  the signal above is most relevant in this window")
-    print("    > 30 days  consider weighting WAIT more; more time = more optionality")
+    print(f"  {_t('time_title')}")
+    print(_t("time_7d"))
+    print(_t("time_30d"))
+    print(_t("time_long"))
     print()
-    print("  ⚠  Past signal accuracy is no guarantee of future results.")
-    print("     This tool does not constitute financial or investment advice.")
+    print(f"  ⚠  {_t('disc1')}")
+    print(f"     {_t('disc2')}")
     print()
     print("═" * W)
     print()
@@ -731,6 +837,7 @@ def main() -> None:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""examples:
   python fx_timing.py                        live analysis, run any day
+  python fx_timing.py --lang pt              saída em português
   python fx_timing.py --backtest             backtest on default schedule (2nd & 17th)
   python fx_timing.py --backtest --days 5 20 backtest on your own schedule (5th & 20th)
   python fx_timing.py --backtest --days 15   backtest on a single day per month""",
@@ -749,7 +856,16 @@ def main() -> None:
         help="Day(s) of the month to check (default: 2 17). "
         "Set to the day(s) you typically receive USD payments.",
     )
+    parser.add_argument(
+        "--lang",
+        choices=["en", "pt"],
+        default="en",
+        help="Output language: en (default) or pt (português)",
+    )
     args = parser.parse_args()
+
+    global _LANG
+    _LANG = args.lang
 
     # Validate day numbers
     for d in args.days:

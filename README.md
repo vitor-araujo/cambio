@@ -109,7 +109,11 @@ No API keys required. Data is fetched live from Yahoo Finance and the BCB open A
 ### live — run any day
 
 ```bash
+# English (default)
 .venv/bin/python fx_timing.py
+
+# Português
+.venv/bin/python fx_timing.py --lang pt
 ```
 
 Fetches current market data, outputs a recommendation in ~5 seconds. Run it whenever you have USD to convert and are deciding whether to act now or hold.
@@ -125,6 +129,9 @@ Fetches current market data, outputs a recommendation in ~5 seconds. Run it when
 
 # freelance, two paydays a month?
 .venv/bin/python fx_timing.py --backtest --days 10 25
+
+# combine with language flag
+.venv/bin/python fx_timing.py --lang pt --backtest --days 5
 ```
 
 The `--days` flag sets which days of the month to treat as decision points. **Accuracy varies by schedule** — backtest your own dates before relying on the model.
