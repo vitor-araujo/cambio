@@ -1,197 +1,227 @@
-# timing-the-real
-
-> A quantitative signal model for timing USD → BRL currency exchanges.
-
-**Not investment advice. Not financial advice. A tool to reduce emotional timing — nothing more.**
-
----
-
-## What it does
-
-Fetches live market data, runs 10 quantitative signals across macro, technical, and carry dimensions, and outputs a probability distribution: should you exchange USD to BRL **now**, **wait**, or **split**?
-
-Includes a full **walk-forward backtest** (2022 → present) on every 2nd and 17th of each month so you can see exactly how the model would have performed on historical data before trusting it with real money.
+<p align="center">
+  <h1 align="center">cambio</h1>
+  <p align="center">a quantitative timing model for USD → BRL exchanges</p>
+  <p align="center">
+    <img src="https://img.shields.io/badge/python-3.10+-4B8BBE?style=flat-square&logo=python&logoColor=white" />
+    <img src="https://img.shields.io/badge/license-MIT-22c55e?style=flat-square" />
+    <img src="https://img.shields.io/badge/data-free%20%2F%20no%20API%20key-f59e0b?style=flat-square" />
+    <img src="https://img.shields.io/badge/NOW%20accuracy-52.4%25-6366f1?style=flat-square" />
+  </p>
+</p>
 
 ---
 
-## ⚠️ Disclaimer
-
-**This tool is for educational and informational purposes only.**
-
-- It is **not** financial advice, investment advice, or a recommendation to buy, sell, or hold any currency or asset.
-- Past model accuracy does **not** guarantee future results.
-- FX markets are unpredictable. The model's backtest shows ~52 % accuracy on "exchange now" calls — barely above a coin flip.
-- **Always consult a licensed financial advisor before making currency exchange decisions.**
-- The authors accept no liability for any financial losses arising from use of this tool.
+> **Not financial advice. Not investment advice.**  
+> This is a decision-support tool — it removes emotion from timing, it does not predict the future.  
+> Past accuracy does not guarantee future results. Use at your own risk.
 
 ---
 
-## Signals
+## what it does
 
-The model computes a weighted composite from 10 signals across three factor categories:
-
-### Momentum (~42%)
-| Signal | Ticker | Logic |
-|---|---|---|
-| DXY | `DX-Y.NYB` | Dollar strength → USD/BRL up → wait |
-| Brent Crude | `BZ=F` | Commodities up → BRL stronger → exchange now |
-| VALE | `VALE` | Iron ore proxy → Brazil trade → exchange now |
-| VIX | `^VIX` | Risk-off spike → EM selloff → wait |
-| IBOVESPA | `^BVSP` | Brazil equity sentiment → exchange now |
-
-### Carry (~5%)
-| Signal | Source | Logic |
-|---|---|---|
-| SELIC − FFR | BCB API + `^IRX` | High positive carry → BRL attractive → wait |
-
-### Mean-Reversion / Peak Detection (~38%)
-| Signal | Logic |
-|---|---|
-| RSI(14) on USD/BRL | Overbought → exchange now before rate falls |
-| Bollinger %B on USD/BRL | Near upper band → exchange now |
-| USD/BRL Historical Percentile | Rate at multi-year high → exchange now |
-| 30d MA Slope of USD/BRL | Rising trend → wait; falling → exchange now |
-
-All momentum signals are z-score normalised (±3σ → ±1) via a 5/20d MA crossover. An ADX(14) regime filter applies a residual nudge when a strong directional trend is confirmed.
-
----
-
-## Backtest results (2022 – present)
-
-Walk-forward, no look-ahead. Evaluated on the **next check date** (the actual next 2nd or 17th you would have traded on) — not a theoretical maximum that you couldn't have acted on.
+On every **2nd and 17th of the month** — the cadence that matters for most retail FX decisions — run:
 
 ```
-Exchange Now    52.4 %   (21 calls)
-Wait            44.4 %   (81 calls)
+python fx_timing.py
 ```
 
-| Year | Accuracy | NOW | WAIT |
-|------|----------|-----|------|
-| 2022 | 54.2 % | 6 | 18 |
-| 2023 | 33.3 % | 2 | 22 |
-| 2024 | 50.0 % | 6 | 18 |
-| 2025 | 54.2 % | 7 | 17 |
-
-**Honest read:** The model's real value is as a **NOW filter** — when it fires "exchange now", the current rate has a >50 % chance of being a local peak. The WAIT signal is closer to a coin flip and should be treated as a directional lean, not a confident prediction.
+You get a probability distribution across three outcomes, a composite signal score, and a clear recommendation backed by 10 quantitative indicators across macro, technical, and carry dimensions.
 
 ---
 
-## Installation
-
-Requires Python 3.10+.
-
-```bash
-git clone https://github.com/vitor-araujo/timing-the-real.git
-cd timing-the-real
-
-python3 -m venv .venv
-.venv/bin/pip install yfinance pandas numpy
-```
-
----
-
-## Usage
-
-### Live analysis
-```bash
-.venv/bin/python fx_timing.py
-```
-
-Fetches live data, runs all signals, outputs the current recommendation.
+## demo
 
 ```
 ══════════════════════════════════════════════════════════════════
   USD → BRL   EXCHANGE TIMING MODEL
   2025-06-02   ·   R$ 5.7208
+══════════════════════════════════════════════════════════════════
 
-  Trend Regime:  ranging / no trend
+  Trend Regime:  ranging / no trend  (mean-reversion signals active)
 
-  SIGNALS               ← WAIT   NOW →   score   wt
-  ─────────────────────────────────────────────────────────
+  SIGNALS                      ← WAIT   NOW →   score    wt
+  ────────────────────────────────────────────────────────────────
 
   DXY                |                |  -0.12  14%  [WAIT]
+    103.4  vs MA20 104.1  ↓
+
   Brent              |        ▶▶▶     |  +0.41   8%  [NOW ]
-  ...
+    $82.1  vs MA20 $79.3  ↑
+
+  VALE               |        ▶▶▶     |  +0.50   6%  [NOW ]
+    $14.2  vs MA20 $13.1  ↑
+
+  VIX                |                |  -0.08  10%  [FLAT]
+    18.3  calm
+
+  IBOV               |        ▶▶▶     |  +0.44   8%  [NOW ]
+    128540 vs MA20 123800  ↑
+
+  Carry              |    ◀◀◀         |  -0.52   5%  [WAIT]
+    8.7%/yr  attractive→WAIT
+
+  USD/BRL Level      |  ◀◀◀           |  -0.40  13%  [WAIT]
+    R$5.7208  72th pct  ADX 21.4
+
+  RSI(14)            |        ▶▶▶▶    |  +0.55  15%  [NOW ]
+    63.8  neutral  [ranging]
+
+  Bollinger %B       |        ▶▶▶▶    |  +0.64  11%  [NOW ]
+    0.82  within bands  [ranging]
+
+  USD/BRL Trend      |                |  +0.06  10%  [FLAT]
+    ↑ rising slope  [+0.12% / 10d]
+
+  Composite: +0.178   Agreement: 60%   Regime adj: +0.00
+
+  PROBABILITY DISTRIBUTION
+  ────────────────────────────────────────────────────────────────
+
+  Exchange Now   58.2%  [████████████████████░░░░░░░░░░░░░░]
+  Split 50/50    12.9%  [████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░]
+  Wait           28.9%  [██████████░░░░░░░░░░░░░░░░░░░░░░░░]
+
+  ────────────────────────────────────────────────────────────────
 
   ▶  ⚡ EXCHANGE NOW
+     Rate is favorable — signals point to BRL weakening ahead
+
+  Time horizon override:
+    < 7 days  → execute regardless of model
+    7–30d     → follow model recommendation
+    > 30d     → weight WAIT more aggressively
+
+══════════════════════════════════════════════════════════════════
 ```
 
-### Walk-forward backtest
+---
+
+## signals
+
+Three factor families, 10 signals total — all computed walk-forward with no look-ahead.
+
+### momentum  `~42% weight`
+
+| Signal | Source | Direction |
+|---|---|---|
+| DXY (Dollar Index) | `DX-Y.NYB` | Rising → USD stronger → **wait** |
+| Brent Crude | `BZ=F` | Rising → commodity boost for BRL → **now** |
+| VALE (iron ore proxy) | `VALE` | Rising → Brazil trade surplus → **now** |
+| VIX (risk sentiment) | `^VIX` | Elevated + rising → risk-off, EM sells → **wait** |
+| IBOVESPA | `^BVSP` | Rising → Brazil sentiment improving → **now** |
+
+### carry  `~5% weight`
+
+| Signal | Source | Direction |
+|---|---|---|
+| SELIC − Fed Funds Rate | BCB open API + `^IRX` | High differential → BRL carry attractive → **wait** |
+
+Carry weight is intentionally low: historically high SELIC masked by z-score drift caused consistent miscalibration. Kept as a weak WAIT signal only.
+
+### mean-reversion / peak detection  `~38% weight`
+
+| Signal | Direction |
+|---|---|
+| RSI(14) on USD/BRL | > 70 overbought → **now**; < 30 oversold → **wait** |
+| Bollinger %B on USD/BRL | Near upper band → **now**; near lower → **wait** |
+| Historical percentile of USD/BRL | Rate at multi-year high → **now** |
+| 30d MA slope of USD/BRL | Rising → **wait**; falling → **now** |
+
+RSI and Bollinger %B are **ADX-conditioned**: in a strong trend (ADX > 25), their weights are suppressed by up to 70% to avoid calling mean-reversion against a running trend.
+
+---
+
+## backtest
+
+Walk-forward on every **2nd and 17th** from January 2022 to present. Oracle = rate at **next check date** (not the theoretical intraday maximum — that's a rate you could never actually trade at).
+
+```
+Exchange Now    52.4 %   (21 calls, 11 correct)
+Wait            44.4 %   (81 calls)
+Overall         46.1 %   (102 decisions)
+```
+
+| Year | Accuracy | NOW calls | WAIT calls |
+|------|----------|-----------|------------|
+| 2022 | 54.2 % | 6 | 18 |
+| 2023 | 33.3 % | 2 | 22 |
+| 2024 | 50.0 % | 6 | 18 |
+| 2025 | 54.2 % | 7 | 17 |
+
+**Honest read:** The model's primary value is as a **NOW filter**. At 52 % precision, when it fires "exchange now" the current rate is more likely a local peak than not. The WAIT signal is a directional lean, not a confident prediction — treat it accordingly.
+
+Run it yourself:
+
 ```bash
+python fx_timing.py --backtest
+```
+
+---
+
+## install
+
+```bash
+git clone https://github.com/vitor-araujo/cambio.git
+cd cambio
+
+python3 -m venv .venv
+.venv/bin/pip install yfinance pandas numpy
+```
+
+No API keys required. All data is fetched live from Yahoo Finance and the BCB open API.
+
+---
+
+## usage
+
+```bash
+# live recommendation (run any time, ~5 seconds)
+.venv/bin/python fx_timing.py
+
+# full walk-forward backtest (~2 minutes)
 .venv/bin/python fx_timing.py --backtest
 ```
 
-Runs the full historical simulation (~2 min). Shows a decision table, accuracy breakdown by year, and a sequential P&L simulation of following the model vs immediate exchange.
-
 ---
 
-## How the decision works
+## time horizon override
 
-```
-composite score = Σ(signal_score × weight) / Σ(weights)
-
-p_now  = sigmoid(composite × 4)
-p_wait = 1 − p_now
-(signal disagreement routes mass into "split")
-
-if p_now > 0.51  →  EXCHANGE NOW
-else             →  WAIT
-```
-
-The 0.51 threshold was calibrated on the walk-forward backtest to maximise NOW precision (>51%) while keeping call volume meaningful (~20 calls over 3 years).
-
----
-
-## Time horizon override
-
-Regardless of what the model says:
+The model assumes you have 7–30 days of flexibility. If you don't:
 
 | Horizon | Action |
 |---|---|
-| < 7 days | Execute regardless |
-| 7 – 30 days | Follow the model |
+| < 7 days | Execute regardless of model signal |
+| 7 – 30 days | Follow the recommendation |
 | > 30 days | Weight WAIT more aggressively |
 
 ---
 
-## Project structure
+## structure
 
 ```
-timing-the-real/
-├── fx_timing.py   # entry point — run this
-├── signals.py     # signal library (indicators, build_signals)
+cambio/
+├── fx_timing.py    ← run this
+├── signals.py      ← signal library, indicators
 ├── LICENSE
 └── README.md
 ```
 
 ---
 
-## Data sources
+## contributing
 
-All data is fetched at runtime from free public sources:
+PRs welcome. High-value directions:
 
-- **Yahoo Finance** via [`yfinance`](https://github.com/ranaroussi/yfinance) — prices, indices, ETFs
-- **Banco Central do Brasil (BCB) open API** — SELIC rate (series 432, no key required)
+- Brazil 5Y CDS as sovereign risk signal
+- COPOM meeting dates as volatility event filter
+- Cross-sectional EM FX peer momentum (ZAR, MXN, CLP)
+- HMM 2-state regime classifier to replace ADX
 
-No API keys needed.
-
----
-
-## Contributing
-
-PRs welcome. Useful directions:
-
-- Better Brazil sovereign risk proxy (EMBI+ spread, CDS)
-- COPOM meeting calendar as a volatility event signal
-- Peer EM FX cross-sectional momentum (ZAR, MXN, CLP)
-- Regime detection via HMM (2-state)
-
-Please keep the core script runnable as a single command and add a backtest result to any signal PR.
+Keep the single-file entrypoint. Include backtest diff in any signal PR.
 
 ---
 
-## License
+## license
 
-MIT — see [LICENSE](LICENSE).
-
-Use freely. No warranty. Not financial advice.
+MIT. See [LICENSE](LICENSE).  
+Free to use. No warranty. **Not financial advice.**
