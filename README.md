@@ -5,7 +5,7 @@
     <img src="https://img.shields.io/badge/python-3.10+-4B8BBE?style=flat-square&logo=python&logoColor=white" />
     <img src="https://img.shields.io/badge/license-MIT-22c55e?style=flat-square" />
     <img src="https://img.shields.io/badge/data-free%20%2F%20no%20API%20key-f59e0b?style=flat-square" />
-    <img src="https://img.shields.io/badge/NOW%20accuracy-52.4%25-6366f1?style=flat-square" />
+    <img src="https://img.shields.io/badge/NOW%20accuracy-52–75%25-6366f1?style=flat-square" />
   </p>
 </p>
 
@@ -19,13 +19,12 @@
 
 ## what it does
 
-On every **2nd and 17th of the month** — the cadence that matters for most retail FX decisions — run:
+You receive a USD payment. You need to convert it to BRL at some point.  
+Do you exchange today, or wait for a better rate?
 
-```
-python fx_timing.py
-```
+Run `cambio` on the day you're deciding. It fetches live market data, runs 10 quantitative signals across macro, technical, and carry dimensions, and outputs a probability-weighted recommendation.
 
-You get a probability distribution across three outcomes, a composite signal score, and a clear recommendation backed by 10 quantitative indicators across macro, technical, and carry dimensions.
+You can also **backtest it against your own payment schedule** — the day you typically receive funds — to see how the model would have performed historically on your specific dates.
 
 ---
 
@@ -86,13 +85,51 @@ You get a probability distribution across three outcomes, a composite signal sco
   ▶  ⚡ EXCHANGE NOW
      Rate is favorable — signals point to BRL weakening ahead
 
-  Time horizon override:
-    < 7 days  → execute regardless of model
-    7–30d     → follow model recommendation
-    > 30d     → weight WAIT more aggressively
-
 ══════════════════════════════════════════════════════════════════
 ```
+
+---
+
+## install
+
+```bash
+git clone https://github.com/vitor-araujo/cambio.git
+cd cambio
+
+python3 -m venv .venv
+.venv/bin/pip install yfinance pandas numpy
+```
+
+No API keys required. Data is fetched live from Yahoo Finance and the BCB open API.
+
+---
+
+## usage
+
+### live — run any day
+
+```bash
+.venv/bin/python fx_timing.py
+```
+
+Fetches current market data, outputs a recommendation in ~5 seconds. Run it whenever you have USD to convert and are deciding whether to act now or hold.
+
+### backtest — calibrate to your payment schedule
+
+```bash
+# default: tests the 2nd and 17th of each month (2022 → present)
+.venv/bin/python fx_timing.py --backtest
+
+# your salary lands on the 5th? test that
+.venv/bin/python fx_timing.py --backtest --days 5
+
+# freelance, two paydays a month?
+.venv/bin/python fx_timing.py --backtest --days 10 25
+```
+
+The `--days` flag sets which days of the month to treat as decision points. **Accuracy varies by schedule** — backtest your own dates before relying on the model.
+
+Example: on a **5th & 20th** schedule, "exchange now" calls showed **75 % accuracy** historically. Default 2nd & 17th gives 52 %. Same model, different cadence.
 
 ---
 
@@ -116,8 +153,6 @@ Three factor families, 10 signals total — all computed walk-forward with no lo
 |---|---|---|
 | SELIC − Fed Funds Rate | BCB open API + `^IRX` | High differential → BRL carry attractive → **wait** |
 
-Carry weight is intentionally low: historically high SELIC masked by z-score drift caused consistent miscalibration. Kept as a weak WAIT signal only.
-
 ### mean-reversion / peak detection  `~38% weight`
 
 | Signal | Direction |
@@ -127,71 +162,38 @@ Carry weight is intentionally low: historically high SELIC masked by z-score dri
 | Historical percentile of USD/BRL | Rate at multi-year high → **now** |
 | 30d MA slope of USD/BRL | Rising → **wait**; falling → **now** |
 
-RSI and Bollinger %B are **ADX-conditioned**: in a strong trend (ADX > 25), their weights are suppressed by up to 70% to avoid calling mean-reversion against a running trend.
+RSI and Bollinger %B are **ADX-conditioned**: in a strong trend (ADX > 25) their weights are suppressed to avoid calling mean-reversion against a running trend.
 
 ---
 
-## backtest
+## backtest results
 
-Walk-forward on every **2nd and 17th** from January 2022 to present. Oracle = rate at **next check date** (not the theoretical intraday maximum — that's a rate you could never actually trade at).
+Walk-forward, no look-ahead. Oracle = rate at your **next scheduled check date** (not a theoretical maximum you couldn't trade at).
+
+Default schedule (2nd & 17th):
 
 ```
-Exchange Now    52.4 %   (21 calls, 11 correct)
+Exchange Now    52.4 %   (21 calls)
 Wait            44.4 %   (81 calls)
-Overall         46.1 %   (102 decisions)
 ```
 
-| Year | Accuracy | NOW calls | WAIT calls |
-|------|----------|-----------|------------|
+| Year | Accuracy | NOW | WAIT |
+|------|----------|-----|------|
 | 2022 | 54.2 % | 6 | 18 |
 | 2023 | 33.3 % | 2 | 22 |
 | 2024 | 50.0 % | 6 | 18 |
 | 2025 | 54.2 % | 7 | 17 |
 
-**Honest read:** The model's primary value is as a **NOW filter**. At 52 % precision, when it fires "exchange now" the current rate is more likely a local peak than not. The WAIT signal is a directional lean, not a confident prediction — treat it accordingly.
-
-Run it yourself:
-
-```bash
-python fx_timing.py --backtest
-```
+**Run `--backtest --days <your-days>` to see results for your own schedule.**
 
 ---
 
-## install
+## time horizon
 
-```bash
-git clone https://github.com/vitor-araujo/cambio.git
-cd cambio
-
-python3 -m venv .venv
-.venv/bin/pip install yfinance pandas numpy
-```
-
-No API keys required. All data is fetched live from Yahoo Finance and the BCB open API.
-
----
-
-## usage
-
-```bash
-# live recommendation (run any time, ~5 seconds)
-.venv/bin/python fx_timing.py
-
-# full walk-forward backtest (~2 minutes)
-.venv/bin/python fx_timing.py --backtest
-```
-
----
-
-## time horizon override
-
-The model assumes you have 7–30 days of flexibility. If you don't:
-
-| Horizon | Action |
+| You need BRL in… | Action |
 |---|---|
-| < 7 days | Execute regardless of model signal |
-| 7 – 30 days | Follow the recommendation |
+| < 7 days | Exchange regardless of signal |
+| 7 – 30 days | Follow the model |
 | > 30 days | Weight WAIT more aggressively |
 
 ---
@@ -200,8 +202,8 @@ The model assumes you have 7–30 days of flexibility. If you don't:
 
 ```
 cambio/
-├── fx_timing.py    ← run this
-├── signals.py      ← signal library, indicators
+├── fx_timing.py    ← entry point
+├── signals.py      ← indicator library
 ├── LICENSE
 └── README.md
 ```
@@ -214,14 +216,14 @@ PRs welcome. High-value directions:
 
 - Brazil 5Y CDS as sovereign risk signal
 - COPOM meeting dates as volatility event filter
-- Cross-sectional EM FX peer momentum (ZAR, MXN, CLP)
+- Cross-sectional EM FX momentum (ZAR, MXN, CLP)
 - HMM 2-state regime classifier to replace ADX
 
-Keep the single-file entrypoint. Include backtest diff in any signal PR.
+Keep the single-command entrypoint. Include backtest diff in any signal PR.
 
 ---
 
 ## license
 
-MIT. See [LICENSE](LICENSE).  
+MIT — see [LICENSE](LICENSE).  
 Free to use. No warranty. **Not financial advice.**

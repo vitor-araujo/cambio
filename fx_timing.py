@@ -247,14 +247,75 @@ def sbar(score: float, half: int = 8) -> str:
 
 def regime_label(regime: float) -> str:
     if regime > 0.6:
-        return "STRONG UPTREND  (BRL weakening — regime filter: suppressing NOW)"
+        return (
+            "sustained uptrend detected  (BRL weakening trend — NOW signals suppressed)"
+        )
     if regime > 0.15:
-        return "mild uptrend  (regime filter: slight WAIT bias)"
+        return "mild uptrend  (slight WAIT bias applied)"
     if regime < -0.6:
-        return "STRONG DOWNTREND  (BRL strengthening — regime filter: suppressing WAIT)"
+        return "sustained downtrend detected  (BRL strengthening trend — WAIT signals suppressed)"
     if regime < -0.15:
-        return "mild downtrend  (regime filter: slight NOW bias)"
-    return "ranging / no trend  (mean-reversion signals active)"
+        return "mild downtrend  (slight NOW bias applied)"
+    return "no clear trend  (mean-reversion signals fully active)"
+
+
+def _verdict(d: str, pn: float, pw: float) -> tuple[str, str, str]:
+    """
+    Returns (icon, headline, subtext) graded by conviction level.
+    Language is intentionally hedged — this is a probabilistic signal,
+    not a guarantee or recommendation.
+    """
+    if d == "exchange_now":
+        if pn > 0.70:
+            headline = "signals lean toward exchanging now"
+            sub = (
+                "Multiple indicators suggest the current rate may be near a local high. "
+                "This is not a guarantee — past signal accuracy has been ~52 % on this call."
+            )
+        elif pn > 0.57:
+            headline = "signals moderately suggest considering an exchange"
+            sub = (
+                "Some indicators point to the current rate being relatively favourable. "
+                "Confidence is moderate — splitting (50 % now, 50 % later) is a reasonable alternative."
+            )
+        else:
+            headline = "signals weakly lean toward exchanging now"
+            sub = (
+                "The balance of indicators tilts slightly toward now, but conviction is low. "
+                "Splitting or waiting are equally defensible choices."
+            )
+        return "◈", headline, sub
+
+    if d == "wait":
+        if pw > 0.70:
+            headline = "signals lean toward waiting"
+            sub = (
+                "Multiple indicators suggest a better rate may become available. "
+                "This is not a guarantee — the WAIT signal historically performs near 44 %."
+            )
+        elif pw > 0.57:
+            headline = "signals moderately suggest waiting"
+            sub = (
+                "Some indicators point to continued USD strength. "
+                "Confidence is moderate — if you have a deadline within 7 days, execute regardless."
+            )
+        else:
+            headline = "signals weakly lean toward waiting"
+            sub = (
+                "The balance of indicators tilts slightly toward waiting, but conviction is low. "
+                "Splitting (50 % now, 50 % later) may be the most prudent path."
+            )
+        return "◷", headline, sub
+
+    # split
+    return (
+        "◫",
+        "signals are inconclusive — consider splitting",
+        (
+            "Indicators are mixed with no clear directional conviction. "
+            "Exchanging 50 % now and 50 % later reduces timing regret without requiring a call."
+        ),
+    )
 
 
 def render_live(signals: list[Signal], probs: dict) -> None:
@@ -303,39 +364,56 @@ def render_live(signals: list[Signal], probs: dict) -> None:
         print(f"  {label:<13}  {p:>5.1%}  [{pbar(p)}]")
 
     d = decide(probs)
+    pn = probs["exchange_now"]
+    pw = probs["wait"]
+    icon, headline, sub = _verdict(d, pn, pw)
+
     print()
     print("  " + "─" * (W - 2))
     print()
-    if d == "exchange_now":
-        print("  ▶  ⚡ EXCHANGE NOW")
-        print("     Rate is favorable — signals point to BRL weakening ahead")
-    elif d == "wait":
-        print("  ▶  ⏳ WAIT")
-        print("     USD strengthening or carry attractive — better rate likely ahead")
-    else:
-        print("  ▶  ⚖  SPLIT  (50 % now · 50 % later)")
-        print("     Mixed signals — splitting reduces timing regret")
+    print(f"  {icon}  {headline}")
+    # wrap subtext at ~62 chars
+    words, line_buf = sub.split(), ""
+    for word in words:
+        if len(line_buf) + len(word) + 1 > 62:
+            print(f"     {line_buf.rstrip()}")
+            line_buf = word + " "
+        else:
+            line_buf += word + " "
+    if line_buf.strip():
+        print(f"     {line_buf.rstrip()}")
 
     print()
-    print("  Time horizon override:")
-    print("    < 7 days  → execute regardless of model")
-    print("    7–30d     → follow model recommendation")
-    print("    > 30d     → weight WAIT more aggressively")
+    print("  Time horizon note:")
+    print(
+        "    < 7 days   execute regardless — timing models don't help at this horizon"
+    )
+    print("    7–30 days  the signal above is most relevant in this window")
+    print("    > 30 days  consider weighting WAIT more; more time = more optionality")
+    print()
+    print("  ⚠  Past signal accuracy is no guarantee of future results.")
+    print("     This tool does not constitute financial or investment advice.")
     print()
     print("═" * W)
     print()
 
 
 # ── Backtest Helpers ──────────────────────────────────────────────────────────
-def decision_dates(start: str = BACKTEST_START) -> list[date]:
-    """All 2nd and 17th of each month from start to two days ago."""
+def decision_dates(
+    start: str = BACKTEST_START,
+    check_days: tuple[int, ...] = (2, 17),
+) -> list[date]:
+    """All occurrences of check_days in each month from start to two days ago."""
     out: list[date] = []
     sd = datetime.strptime(start, "%Y-%m-%d").date()
     end = date.today() - timedelta(days=2)
     y, m = sd.year, sd.month
     while date(y, m, 1) <= end:
-        for day in (2, 17):
-            d = date(y, m, day)
+        for day in check_days:
+            try:
+                d = date(y, m, day)
+            except ValueError:
+                continue  # e.g. day 31 in a 30-day month
             if sd <= d <= end:
                 out.append(d)
         m += 1
@@ -392,12 +470,16 @@ class Row:
 def run_backtest(
     all_data: dict[str, pd.Series],
     carry_diff: Optional[pd.Series],
+    check_days: tuple[int, ...] = (2, 17),
 ) -> list[Row]:
     usdbrl = all_data["usdbrl"]
-    dates = decision_dates()
+    dates = decision_dates(check_days=check_days)
     rows: list[Row] = []
 
-    print(f"\n  Running walk-forward backtest on {len(dates)} decision dates...")
+    days_str = " & ".join(str(d) for d in check_days)
+    print(
+        f"\n  Running walk-forward backtest on {len(dates)} decision dates  [{days_str} of each month]..."
+    )
 
     for d in dates:
         ts = pd.Timestamp(d)
@@ -457,16 +539,19 @@ class Scenario:
     brl_immediate: float
 
 
-def sequential_sim(rows: list[Row]) -> list[Scenario]:
+def sequential_sim(
+    rows: list[Row], check_days: tuple[int, ...] = (2, 17)
+) -> list[Scenario]:
     """
-    From each 2nd-of-month, follow model decisions until NOW/SPLIT fires
+    From each first check-day of the month, follow model decisions until NOW/SPLIT fires
     or MAX_WAIT periods elapse, then compare BRL received vs day-1 exchange.
     """
     row_map = {r.date: r for r in rows}
     all_dates = sorted(row_map)
     scenarios: list[Scenario] = []
+    first_day = min(check_days)  # use lowest day as the scenario start
 
-    for start_d in (d for d in all_dates if d.day == 2):
+    for start_d in (d for d in all_dates if d.day == first_day):
         pool = [d for d in all_dates if d >= start_d][: MAX_WAIT + 1]
         if not pool:
             continue
@@ -504,11 +589,16 @@ def sequential_sim(rows: list[Row]) -> list[Scenario]:
 
 
 # ── Backtest Rendering ────────────────────────────────────────────────────────
-def render_backtest(rows: list[Row], scenarios: list[Scenario]) -> None:
+def render_backtest(
+    rows: list[Row],
+    scenarios: list[Scenario],
+    check_days: tuple[int, ...] = (2, 17),
+) -> None:
     W = 86
+    days_str = " & ".join(str(d) for d in check_days)
 
     print("\n" + "═" * W)
-    print("  USD → BRL  WALK-FORWARD BACKTEST  (2nd & 17th of each month since 2022)")
+    print(f"  USD → BRL  WALK-FORWARD BACKTEST  ({days_str} of each month since 2022)")
     print("  Signals: DXY · Brent · VALE · VIX · IBOV · Carry · Level · RSI · BB%B")
     print("  Regime:  ADX(14) trend filter applied to final probabilities")
     print("═" * W)
@@ -636,19 +726,44 @@ def _print_fetch_status(data: dict[str, pd.Series]) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="USD/BRL Exchange Timing Model")
+    parser = argparse.ArgumentParser(
+        description="USD/BRL Exchange Timing Model",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""examples:
+  python fx_timing.py                        live analysis, run any day
+  python fx_timing.py --backtest             backtest on default schedule (2nd & 17th)
+  python fx_timing.py --backtest --days 5 20 backtest on your own schedule (5th & 20th)
+  python fx_timing.py --backtest --days 15   backtest on a single day per month""",
+    )
     parser.add_argument(
         "--backtest",
         action="store_true",
-        help="Walk-forward backtest on 2nd & 17th since 2022",
+        help="Walk-forward backtest since 2022",
+    )
+    parser.add_argument(
+        "--days",
+        nargs="+",
+        type=int,
+        default=[2, 17],
+        metavar="DAY",
+        help="Day(s) of the month to check (default: 2 17). "
+        "Set to the day(s) you typically receive USD payments.",
     )
     args = parser.parse_args()
+
+    # Validate day numbers
+    for d in args.days:
+        if not 1 <= d <= 28:
+            parser.error(f"--days: {d} is out of range. Use values between 1 and 28.")
+    check_days = tuple(sorted(set(args.days)))
 
     if args.backtest:
         warmup = (
             datetime.strptime(BACKTEST_START, "%Y-%m-%d") - timedelta(days=90)
         ).strftime("%Y-%m-%d")
-        print(f"\n  Fetching full history from {warmup} ...")
+        days_str = " & ".join(str(d) for d in check_days)
+        print(f"\n  Schedule: {days_str} of each month")
+        print(f"  Fetching full history from {warmup} ...")
         all_data = fetch(warmup)
         if not all_data:
             print("  ERROR: no data fetched — check connectivity.\n")
@@ -667,9 +782,9 @@ def main() -> None:
         else:
             print("  ⚠  carry signal disabled (BCB or ^IRX unavailable)")
 
-        rows = run_backtest(all_data, carry_diff)
-        scenarios = sequential_sim(rows)
-        render_backtest(rows, scenarios)
+        rows = run_backtest(all_data, carry_diff, check_days)
+        scenarios = sequential_sim(rows, check_days)
+        render_backtest(rows, scenarios, check_days)
 
     else:
         start = (datetime.now() - timedelta(days=LIVE_FETCH_DAYS)).strftime("%Y-%m-%d")
