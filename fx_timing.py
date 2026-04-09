@@ -173,7 +173,7 @@ AMOUNT = 10_000  # USD per scenario
 REGIME_STRENGTH = 0.55  # how hard the regime filter shifts probabilities
 
 TICKERS = {
-    "usdbrl": "BRL=X",
+    # usdbrl is intentionally omitted — fetched from BCB PTAX instead of Yahoo
     "dxy": "DX-Y.NYB",
     "brent": "BZ=F",
     "vale": "VALE",
@@ -187,12 +187,64 @@ BCB_URL = (
     "?formato=json&dataInicial={start}"
 )
 
+# Tracks whether the current run is using BCB PTAX (True) or Yahoo BRL=X (False)
+_PTAX_SOURCE: bool = False
+
+BCB_PTAX_URL = (
+    "https://olinda.bcb.gov.br/olinda/servico/PTAX/versao/v1/odata/"
+    "CotacaoDolarPeriodo(dataInicial=@dataInicial,dataFinalCotacao=@dataFinalCotacao)"
+    "?@dataInicial='{start}'&@dataFinalCotacao='{end}'"
+    "&$top=15000&$format=json&$select=cotacaoVenda,dataHoraCotacao"
+)
+
 
 # ── Data Fetching ─────────────────────────────────────────────────────────────
+def fetch_ptax(start: str, end: Optional[datetime] = None) -> Optional[pd.Series]:
+    """
+    Fetch USD/BRL PTAX (cotação de venda) from BCB PTAX API.
+
+    PTAX is the official commercial rate published by the Banco Central do Brasil
+    several times per day. This is the rate used for bank transfers and fintechs
+    (Wise, Remessa Online, etc.) — NOT the tourism rate (dólar turismo), which
+    is typically 8–15 % higher.
+
+    Returns one rate per business day (last bulletin of each day).
+    Falls back to None if unavailable.
+    """
+    try:
+        end = end or datetime.now()
+        start_fmt = datetime.strptime(start, "%Y-%m-%d").strftime("%m-%d-%Y")
+        end_fmt = end.strftime("%m-%d-%Y")
+
+        url = BCB_PTAX_URL.format(start=start_fmt, end=end_fmt)
+        req = Request(url, headers={"User-Agent": "cambio/1.0"})
+        raw = json.loads(urlopen(req, timeout=15).read())
+        records = raw.get("value", [])
+
+        if not records:
+            return None
+
+        # Multiple bulletins per day — keep the last one (most recent PTAX)
+        by_date: dict[str, float] = {}
+        for r in records:
+            date_str = r["dataHoraCotacao"][:10]  # "2022-01-03"
+            by_date[date_str] = float(r["cotacaoVenda"])
+
+        dates = [pd.Timestamp(d) for d in sorted(by_date)]
+        values = [by_date[d.strftime("%Y-%m-%d")] for d in dates]
+
+        return pd.Series(values, index=pd.DatetimeIndex(dates), name="ptax").dropna()
+
+    except Exception as e:
+        print(f"  ⚠  PTAX API unavailable ({e}) — falling back to Yahoo BRL=X")
+        return None
+
+
 def fetch(start: str, end: Optional[datetime] = None) -> dict[str, pd.Series]:
     """
-    Fetch Close series for all tickers.
-    For USD/BRL also stores 'usdbrl_high' and 'usdbrl_low' (needed for ADX).
+    Fetch Close series for macro/technical tickers from Yahoo Finance.
+    USD/BRL is sourced from BCB PTAX (commercial rate) with Yahoo BRL=X fallback.
+    PTAX does not provide H/L data — ADX will return zero (ranging mode).
     """
     end = end or datetime.now()
     out: dict[str, pd.Series] = {}
@@ -216,11 +268,33 @@ def fetch(start: str, end: Optional[datetime] = None) -> dict[str, pd.Series]:
 
             out[key] = close
 
-            if key == "usdbrl":
+        except Exception:
+            pass
+
+    # USD/BRL: prefer PTAX (commercial rate) over Yahoo BRL=X (includes spread/markup)
+    global _PTAX_SOURCE
+    ptax = fetch_ptax(start, end)
+    if ptax is not None and len(ptax) > 20:
+        out["usdbrl"] = ptax
+        _PTAX_SOURCE = True
+        # No H/L from PTAX — ADX defaults to zero (ranging, no regime filter)
+    else:
+        _PTAX_SOURCE = False
+        # Fallback: Yahoo BRL=X with OHLC for ADX
+        try:
+            df = yf.download(
+                "BRL=X",
+                start=start,
+                end=end,
+                progress=False,
+                auto_adjust=True,
+                multi_level_index=False,
+            )
+            if not df.empty:
+                out["usdbrl"] = df["Close"].squeeze().dropna()
                 if "High" in df.columns and "Low" in df.columns:
                     out["usdbrl_high"] = df["High"].squeeze().dropna()
                     out["usdbrl_low"] = df["Low"].squeeze().dropna()
-
         except Exception:
             pass
 
@@ -425,12 +499,13 @@ def render_live(signals: list[Signal], probs: dict) -> None:
     regime = probs.get("regime", 0.0)
     W = 66
 
+    rate_label = "PTAX comercial" if _PTAX_SOURCE else "Yahoo FX (≠ PTAX)"
     print()
     print("═" * W)
     print(f"  {_t('title')}")
     print(
         f"  {datetime.now().strftime('%Y-%m-%d  %H:%M')}"
-        + (f"   ·   R$ {rate:.4f}" if rate else "")
+        + (f"   ·   R$ {rate:.4f}  ({rate_label})" if rate else "")
     )
     print("═" * W)
 

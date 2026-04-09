@@ -48,7 +48,7 @@ You receive a USD payment. You need BRL. Do you convert today, or wait?
   ◈  signals lean toward exchanging now
      Multiple indicators suggest the current rate may be near a
      local high. This is not a guarantee — past signal accuracy
-     has been ~52% on this call.
+     has been ~58% on this call.
 
   Time horizon note:
     < 7 days   execute regardless — timing models don't help at this horizon
@@ -109,7 +109,7 @@ Walk-forward, no look-ahead. Oracle = rate at the **next scheduled check date** 
 
 | Schedule | NOW accuracy | WAIT accuracy | Calls |
 |---|---|---|---|
-| 2nd & 17th (default) | 52.4 % | 44.4 % | 102 decisions |
+| 2nd & 17th (default) | 58.3 % | 44.4 % | 102 decisions |
 | 5th & 20th | **75.0 %** | 42.2 % | 103 decisions |
 
 **Accuracy varies by schedule.** Run the backtest on your actual payment dates before relying on the model.
