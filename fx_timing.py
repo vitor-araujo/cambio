@@ -520,26 +520,76 @@ def _verdict(d: str, pn: float, pw: float) -> tuple[str, str, str]:
     return "◫", _t("vs_h"), _t("vs_s")
 
 
-def render_live(signals: list[Signal], probs: dict) -> None:
+def _fetch_live_fx() -> Optional[tuple[float, str]]:
+    """
+    Fetch the current intraday USD/BRL commercial rate.
+
+    Priority:
+      1. AwesomeAPI (economia.awesomeapi.com.br) — aggregates B3 broker feeds,
+         ~0.06 % spread, updates every ~1 min during market hours. No API key.
+      2. Yahoo Finance BRL=X — fallback, carries a tourist-rate markup (~0.5–1 %).
+
+    Returns (rate, source_label) or None on total failure.
+    """
+    # 1 — AwesomeAPI (best free source for dólar comercial)
+    try:
+        url = "https://economia.awesomeapi.com.br/json/last/USD-BRL"
+        req = Request(url, headers={"User-Agent": "cambio/1.0"})
+        raw = json.loads(urlopen(req, timeout=8).read())
+        bid = float(raw["USDBRL"]["bid"])
+        updated = raw["USDBRL"].get("create_date", "")[:16]  # "2026-04-10 10:37"
+        label = f"mercado {updated[11:]}" if updated else "mercado"  # show HH:MM
+        return bid, label
+    except Exception:
+        pass
+
+    # 2 — Yahoo Finance fallback
+    try:
+        df = yf.download("BRL=X", period="2d", progress=False, auto_adjust=True)
+        if not df.empty:
+            return float(df["Close"].iloc[-1]), "Yahoo FX"
+    except Exception:
+        pass
+
+    return None
+
+
+def render_live(
+    signals: list[Signal],
+    probs: dict,
+    live_fx: Optional[tuple[float, str]] = None,
+) -> None:
     rate = next((s.raw for s in signals if s.name == "USD/BRL Level"), None)
     regime = probs.get("regime", 0.0)
     W = 66
 
-    if _PTAX_SOURCE:
-        today = date.today()
-        if _PTAX_DATE and _PTAX_DATE < today:
-            rate_label = f"PTAX {_PTAX_DATE.strftime('%d/%m')} · fora do horário BCB"
+    # Build the rate line: live market rate (AwesomeAPI) + PTAX reference
+    if live_fx:
+        live_val, live_label = live_fx
+        fx_str = f"R$ {live_val:.4f} ({live_label})"
+        if _PTAX_SOURCE and rate:
+            if _PTAX_DATE and _PTAX_DATE < date.today():
+                ptax_str = f"PTAX {_PTAX_DATE.strftime('%d/%m')}: R$ {rate:.4f}"
+            else:
+                ptax_str = f"PTAX: R$ {rate:.4f}"
+            rate_line = f"{fx_str}  ·  {ptax_str}"
         else:
-            rate_label = "PTAX comercial"
+            rate_line = fx_str
+    elif rate:
+        if _PTAX_SOURCE:
+            if _PTAX_DATE and _PTAX_DATE < date.today():
+                rate_line = f"R$ {rate:.4f}  (PTAX {_PTAX_DATE.strftime('%d/%m')} · fora do horário BCB)"
+            else:
+                rate_line = f"R$ {rate:.4f}  (PTAX comercial)"
+        else:
+            rate_line = f"R$ {rate:.4f}  (Yahoo FX)"
     else:
-        rate_label = "Yahoo FX (≠ PTAX)"
+        rate_line = ""
+
     print()
     print("═" * W)
     print(f"  {_t('title')}")
-    print(
-        f"  {datetime.now().strftime('%Y-%m-%d  %H:%M')}"
-        + (f"   ·   R$ {rate:.4f}  ({rate_label})" if rate else "")
-    )
+    print(f"  {datetime.now().strftime('%Y-%m-%d  %H:%M')}   ·   {rate_line}")
     print("═" * W)
 
     print()
@@ -1031,7 +1081,10 @@ def main() -> None:
 
         probs = probabilities(sigs)
         probs = apply_regime(probs, regime)
-        render_live(sigs, probs)
+
+        # Fetch live intraday rate for header display (separate from PTAX signal data)
+        live_fx = _fetch_live_fx()
+        render_live(sigs, probs, live_fx=live_fx)
 
 
 if __name__ == "__main__":
