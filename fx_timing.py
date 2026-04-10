@@ -189,6 +189,8 @@ BCB_URL = (
 
 # Tracks whether the current run is using BCB PTAX (True) or Yahoo BRL=X (False)
 _PTAX_SOURCE: bool = False
+# Date of the last available PTAX bulletin (may be yesterday outside trading hours)
+_PTAX_DATE: Optional[date] = None
 
 BCB_PTAX_URL = (
     "https://olinda.bcb.gov.br/olinda/servico/PTAX/versao/v1/odata/"
@@ -230,10 +232,34 @@ def fetch_ptax(start: str, end: Optional[datetime] = None) -> Optional[pd.Series
             date_str = r["dataHoraCotacao"][:10]  # "2022-01-03"
             by_date[date_str] = float(r["cotacaoVenda"])
 
+        # CotacaoDolarPeriodo lags by 1 day — patch with today via CotacaoDolarDia
+        # (only returns data during BCB trading hours: 10h–14h Brasília)
+        try:
+            today_str = date.today().strftime("%m-%d-%Y")
+            today_url = (
+                "https://olinda.bcb.gov.br/olinda/servico/PTAX/versao/v1/odata/"
+                f"CotacaoDolarDia(dataCotacao=@dataCotacao)?@dataCotacao='{today_str}'"
+                "&$top=10&$format=json&$select=cotacaoVenda,dataHoraCotacao"
+            )
+            today_raw = json.loads(
+                urlopen(
+                    Request(today_url, headers={"User-Agent": "cambio/1.0"}), timeout=10
+                ).read()
+            )
+            for r in today_raw.get("value", []):
+                by_date[r["dataHoraCotacao"][:10]] = float(r["cotacaoVenda"])
+        except Exception:
+            pass  # market closed / outside hours — period data is sufficient
+
         dates = [pd.Timestamp(d) for d in sorted(by_date)]
         values = [by_date[d.strftime("%Y-%m-%d")] for d in dates]
 
-        return pd.Series(values, index=pd.DatetimeIndex(dates), name="ptax").dropna()
+        s = pd.Series(values, index=pd.DatetimeIndex(dates), name="ptax").dropna()
+        # Store the date of the last available bulletin for display
+        global _PTAX_DATE
+        if not s.empty:
+            _PTAX_DATE = s.index[-1].date()
+        return s
 
     except Exception as e:
         print(f"  ⚠  PTAX API unavailable ({e}) — falling back to Yahoo BRL=X")
@@ -499,7 +525,14 @@ def render_live(signals: list[Signal], probs: dict) -> None:
     regime = probs.get("regime", 0.0)
     W = 66
 
-    rate_label = "PTAX comercial" if _PTAX_SOURCE else "Yahoo FX (≠ PTAX)"
+    if _PTAX_SOURCE:
+        today = date.today()
+        if _PTAX_DATE and _PTAX_DATE < today:
+            rate_label = f"PTAX {_PTAX_DATE.strftime('%d/%m')} · fora do horário BCB"
+        else:
+            rate_label = "PTAX comercial"
+    else:
+        rate_label = "Yahoo FX (≠ PTAX)"
     print()
     print("═" * W)
     print(f"  {_t('title')}")
