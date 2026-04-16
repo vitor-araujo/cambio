@@ -74,6 +74,83 @@ No API keys. Pulls live data from Yahoo Finance and the [BCB open API](https://d
 
 ---
 
+## como usar — guia para leigos 🇧🇷
+
+Nunca usou terminal? Sem problema. Siga o passo a passo abaixo.
+
+### 1. instale o Python
+
+Abra o site [python.org/downloads](https://python.org/downloads) e baixe a versão mais recente.  
+Durante a instalação no Windows, **marque a opção "Add Python to PATH"** antes de clicar em instalar.
+
+Para verificar se deu certo, abra o terminal e digite:
+```
+python3 --version
+```
+Se aparecer algo como `Python 3.12.x`, está pronto.
+
+> **Como abrir o terminal:**  
+> — Mac: `Cmd + Espaço` → digite "Terminal" → Enter  
+> — Windows: tecla Windows → digite "cmd" ou "PowerShell" → Enter
+
+### 2. baixe o projeto
+
+No terminal, cole e execute:
+```bash
+git clone https://github.com/vitor-araujo/cambio.git
+cd cambio
+```
+
+Se não tiver o `git` instalado, vá em [git-scm.com](https://git-scm.com) e instale. Ou baixe o ZIP direto pelo GitHub (botão verde "Code" → "Download ZIP") e descompacte a pasta.
+
+### 3. instale as dependências
+
+Ainda no terminal, dentro da pasta `cambio`, execute estes dois comandos um de cada vez:
+
+```bash
+python3 -m venv .venv
+```
+```bash
+.venv/bin/pip install yfinance pandas numpy
+```
+
+> No **Windows**, substitua `.venv/bin/` por `.venv\Scripts\` em todos os comandos.
+
+Isso cria um ambiente isolado e instala as bibliotecas necessárias. Só precisa fazer isso uma vez.
+
+### 4. rode
+
+```bash
+.venv/bin/python fx_timing.py --lang pt
+```
+
+Aguarde alguns segundos enquanto busca os dados. O resultado aparece direto no terminal.
+
+### 5. backtest no seu dia de pagamento
+
+Se você recebe dólares todo dia 10, por exemplo:
+
+```bash
+.venv/bin/python fx_timing.py --lang pt --backtest --days 10
+```
+
+Isso simula como o modelo teria se saído nos últimos anos usando exatamente o seu calendário.
+
+---
+
+### resumo dos comandos
+
+| O que fazer | Comando |
+|---|---|
+| Análise de hoje | `.venv/bin/python fx_timing.py --lang pt` |
+| Backtest padrão | `.venv/bin/python fx_timing.py --lang pt --backtest` |
+| Backtest no seu dia | `.venv/bin/python fx_timing.py --lang pt --backtest --days 10` |
+| Dois dias por mês | `.venv/bin/python fx_timing.py --lang pt --backtest --days 5 20` |
+
+> **Windows:** troque `.venv/bin/python` por `.venv\Scripts\python`
+
+---
+
 ## features
 
 - **10 signals** across three factor families — momentum, carry, and mean-reversion
