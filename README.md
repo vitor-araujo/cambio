@@ -76,78 +76,177 @@ No API keys. Pulls live data from Yahoo Finance and the [BCB open API](https://d
 
 ## como usar — guia para leigos 🇧🇷
 
-Nunca usou terminal? Sem problema. Siga o passo a passo abaixo.
+Nunca mexeu com programação? Sem problema. Esse guia assume que você parte do zero.
 
-### 1. instale o Python
+O **cambio** é um script Python — um programinha de terminal que roda no seu computador, busca os dados na internet e te diz o resultado. Não tem site, não tem app, não tem instalador. Você vai digitar alguns comandos, e só.
 
-Abra o site [python.org/downloads](https://python.org/downloads) e baixe a versão mais recente.  
-Durante a instalação no Windows, **marque a opção "Add Python to PATH"** antes de clicar em instalar.
+---
 
-Para verificar se deu certo, abra o terminal e digite:
+### antes de começar — o que é o terminal?
+
+O terminal (também chamado de "linha de comando") é uma janela onde você digita instruções pro computador em vez de clicar em botões. Parece intimidador no começo, mas você vai usar no máximo 5 comandos diferentes.
+
+**Como abrir:**
+- **Mac:** pressione `Cmd + Espaço`, digite `Terminal`, aperte Enter
+- **Windows:** pressione a tecla Windows, digite `PowerShell`, aperte Enter
+
+Quando o terminal abrir, você vai ver uma linha com um cursor piscando esperando você digitar. É ali que você vai colar os comandos abaixo.
+
+---
+
+### passo 1 — instale o Python
+
+Python é a linguagem em que o cambio foi escrito. Você precisa dela instalada no computador pra rodar o script.
+
+1. Acesse [python.org/downloads](https://python.org/downloads)
+2. Clique no botão amarelo de download (ele detecta seu sistema automaticamente)
+3. Abra o instalador baixado
+
+> ⚠️ **Windows: passo crítico.** Na primeira tela do instalador, antes de clicar em qualquer coisa, **marque a caixinha que diz "Add Python to PATH"**. Se não marcar isso, nada vai funcionar e você vai ter que reinstalar.
+
+Depois de instalar, confirme que deu certo abrindo o terminal e digitando:
+
 ```
 python3 --version
 ```
-Se aparecer algo como `Python 3.12.x`, está pronto.
 
-> **Como abrir o terminal:**  
-> — Mac: `Cmd + Espaço` → digite "Terminal" → Enter  
-> — Windows: tecla Windows → digite "cmd" ou "PowerShell" → Enter
+Aperte Enter. Deve aparecer algo como `Python 3.12.4`. Se aparecer, está pronto. Se aparecer "comando não encontrado", tente `python --version` (sem o 3). Se ainda não funcionar, reinstale o Python e não esqueça do PATH.
 
-### 2. baixe o projeto
+---
 
-No terminal, cole e execute:
+### passo 2 — baixe o projeto
+
+Agora você precisa copiar os arquivos do cambio pro seu computador.
+
+**Opção A — pelo terminal (recomendado):**
+
+Cole esse comando no terminal e aperte Enter:
 ```bash
 git clone https://github.com/vitor-araujo/cambio.git
+```
+
+Isso vai criar uma pasta chamada `cambio` no local atual (normalmente sua pasta de usuário). Se o terminal disser que `git` não existe, baixe em [git-scm.com](https://git-scm.com), instale com as opções padrão, feche e reabra o terminal, e tente de novo.
+
+**Opção B — pelo navegador:**
+
+Acesse [github.com/vitor-araujo/cambio](https://github.com/vitor-araujo/cambio), clique no botão verde **"Code"** e depois em **"Download ZIP"**. Descompacte o ZIP em algum lugar fácil de achar, como a sua Área de Trabalho.
+
+---
+
+### passo 3 — entre na pasta do projeto
+
+No terminal, navegue até a pasta que acabou de criar:
+
+```bash
 cd cambio
 ```
 
-Se não tiver o `git` instalado, vá em [git-scm.com](https://git-scm.com) e instale. Ou baixe o ZIP direto pelo GitHub (botão verde "Code" → "Download ZIP") e descompacte a pasta.
+`cd` significa "change directory" — entrar numa pasta. Se você baixou o ZIP e descompactou em outro lugar, substitua `cambio` pelo caminho completo até a pasta. No Mac você pode arrastar a pasta pro terminal após digitar `cd ` (com espaço) que ele preenche o caminho automaticamente.
 
-### 3. instale as dependências
+Confirme que está no lugar certo digitando:
+```bash
+ls
+```
+(Mac/Linux) ou:
+```bash
+dir
+```
+(Windows). Deve aparecer os arquivos `fx_timing.py`, `signals.py`, `README.md` etc.
 
-Ainda no terminal, dentro da pasta `cambio`, execute estes dois comandos um de cada vez:
+---
+
+### passo 4 — crie o ambiente e instale as bibliotecas
+
+O cambio usa três bibliotecas externas (pacotes com funcionalidades prontas). Antes de instalá-las, criamos um "ambiente virtual" — uma pastinha isolada que guarda essas bibliotecas só pro cambio, sem bagunçar o resto do seu computador.
+
+Execute esses dois comandos, **um de cada vez**, esperando cada um terminar antes de digitar o próximo:
 
 ```bash
 python3 -m venv .venv
 ```
+
+Esse comando cria o ambiente virtual (pode demorar alguns segundos, sem saída visível).
+
 ```bash
 .venv/bin/pip install yfinance pandas numpy
 ```
 
-> No **Windows**, substitua `.venv/bin/` por `.venv\Scripts\` em todos os comandos.
+Esse instala as três bibliotecas. Você vai ver um monte de texto rolando — é normal. Quando voltar pro cursor, está pronto.
 
-Isso cria um ambiente isolado e instala as bibliotecas necessárias. Só precisa fazer isso uma vez.
+> **Windows:** nos dois comandos acima, substitua `.venv/bin/` por `.venv\Scripts\`. Fica assim:
+> ```
+> .venv\Scripts\pip install yfinance pandas numpy
+> ```
 
-### 4. rode
+Esse passo só precisa ser feito **uma única vez**. Da próxima vez que quiser usar o cambio, pode pular direto pro passo 5.
+
+---
+
+### passo 5 — rode
 
 ```bash
 .venv/bin/python fx_timing.py --lang pt
 ```
 
-Aguarde alguns segundos enquanto busca os dados. O resultado aparece direto no terminal.
+Aguarde uns 5–10 segundos. O programa vai buscar dados de câmbio, Ibovespa, dólar, petróleo e juros, processar os sinais, e imprimir o resultado direto no terminal.
 
-### 5. backtest no seu dia de pagamento
+> **Windows:**
+> ```
+> .venv\Scripts\python fx_timing.py --lang pt
+> ```
 
-Se você recebe dólares todo dia 10, por exemplo:
+---
+
+### passo 6 — backtest no seu calendário (opcional mas recomendado)
+
+O backtest mostra como o modelo teria se comportado nos últimos anos nos *seus* dias específicos de decisão — porque a acurácia muda dependendo do dia do mês.
+
+Se você recebe dólares todo dia 5, por exemplo:
 
 ```bash
-.venv/bin/python fx_timing.py --lang pt --backtest --days 10
+.venv/bin/python fx_timing.py --lang pt --backtest --days 5
 ```
 
-Isso simula como o modelo teria se saído nos últimos anos usando exatamente o seu calendário.
+Se recebe no dia 10 e no dia 25:
+
+```bash
+.venv/bin/python fx_timing.py --lang pt --backtest --days 10 25
+```
+
+O backtest demora cerca de 2 minutos e mostra uma tabela completa com cada decisão desde 2022 e o resultado real.
+
+---
+
+### da próxima vez
+
+Você não precisa repetir toda a configuração. Na próxima vez que quiser consultar, basta:
+
+1. Abrir o terminal
+2. Entrar na pasta: `cd cambio`
+3. Rodar: `.venv/bin/python fx_timing.py --lang pt`
 
 ---
 
 ### resumo dos comandos
 
-| O que fazer | Comando |
-|---|---|
-| Análise de hoje | `.venv/bin/python fx_timing.py --lang pt` |
-| Backtest padrão | `.venv/bin/python fx_timing.py --lang pt --backtest` |
-| Backtest no seu dia | `.venv/bin/python fx_timing.py --lang pt --backtest --days 10` |
-| Dois dias por mês | `.venv/bin/python fx_timing.py --lang pt --backtest --days 5 20` |
+| O que fazer | Mac / Linux | Windows |
+|---|---|---|
+| Análise de hoje | `.venv/bin/python fx_timing.py --lang pt` | `.venv\Scripts\python fx_timing.py --lang pt` |
+| Backtest padrão | `... --backtest` | igual |
+| Backtest no seu dia | `... --backtest --days 10` | igual |
+| Dois dias por mês | `... --backtest --days 5 20` | igual |
 
-> **Windows:** troque `.venv/bin/python` por `.venv\Scripts\python`
+---
+
+### algo deu errado?
+
+| Erro | O que fazer |
+|---|---|
+| `python3: command not found` | Python não foi instalado corretamente. Reinstale e marque "Add to PATH" no Windows |
+| `No module named pip` | Tente `python3 -m ensurepip` e repita o passo 4 |
+| `ModuleNotFoundError: No module named 'yfinance'` | Você rodou o Python sem ativar o ambiente. Use `.venv/bin/python`, não só `python` |
+| Tela em branco ou trava | Verifique sua conexão com a internet — o script busca dados ao vivo |
+| Erro no Windows com `\` vs `/` | No Windows, sempre use `\` nos caminhos: `.venv\Scripts\python` |
 
 ---
 
