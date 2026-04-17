@@ -430,33 +430,44 @@ def build_signals(
 
     # ── 11. CME BRL Futures (6L) — institutional positioning ─────────────────
     # 6L is quoted as USD per BRL (e.g. 0.2001 = 1 BRL buys $0.2001).
-    # Rising 6L → institutions buying BRL futures → expect USD/BRL to fall → NOW
-    # Falling 6L → institutions selling BRL futures → expect USD/BRL to rise → WAIT
-    # Answers: "is the market buying the dip or buying the rise of the FX rate?"
+    # NOTE: futures always trade ABOVE spot when SELIC > FFR (normal carry premium).
+    # Comparing futures level to spot is therefore misleading — the carry alone
+    # explains the gap (≈ (r_BRL - r_USD) × T, typically 0.3–0.6 % for a 1m contract).
+    # The useful signal is the TREND of 6L:
+    #   Rising 6L → institutions net-buying BRL futures → USD/BRL declining trend → NOW
+    #   Falling 6L → institutions net-selling BRL → USD/BRL rising trend → WAIT
     if "six_l" in data:
         six_l = data["six_l"]
         mom = z_momentum(six_l)
         cur_6l = float(six_l.iloc[-1])
-        implied_usdbrl = 1.0 / cur_6l if cur_6l > 0 else 0.0
-        ma20_6l = float(six_l.rolling(LONG_MA).mean().iloc[-1])
-        implied_ma = 1.0 / ma20_6l if ma20_6l > 0 else 0.0
+
+        # 3-month price change of 6L — shows net direction of institutional flows
+        lookback = min(63, len(six_l) - 1)  # ~3 months of trading days
+        change_3m = (
+            (cur_6l / float(six_l.iloc[-lookback - 1]) - 1) * 100
+            if lookback > 0
+            else 0.0
+        )
+
+        change_str = f"{change_3m:+.1f}% in 3mo"
 
         if mom > 0.15:
-            pos_note = "↑ institutions buying BRL — expecting USD/BRL to fall"
+            pos_note = (
+                f"↑ 6L {change_str} — institutions net-long BRL (buying the FX dip)"
+            )
         elif mom < -0.15:
-            pos_note = "↓ institutions selling BRL — expecting USD/BRL to rise"
+            pos_note = (
+                f"↓ 6L {change_str} — institutions net-short BRL (buying the FX rise)"
+            )
         else:
-            pos_note = "→ neutral positioning"
+            pos_note = f"→ 6L {change_str} — neutral / no clear positioning"
 
         signals.append(
             Signal(
                 name="BRL Futures (6L)",
-                raw=implied_usdbrl,
-                score=mom,  # positive = buying BRL = NOW
-                note=(
-                    f"R${implied_usdbrl:.4f} implied  "
-                    f"(MA20 R${implied_ma:.4f})  {pos_note}"
-                ),
+                raw=cur_6l,
+                score=mom,  # positive = net buying BRL = NOW
+                note=pos_note,
                 weight=WEIGHTS["six_l"],
             )
         )
