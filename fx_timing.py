@@ -9,8 +9,11 @@ pip install yfinance pandas numpy
 """
 
 import argparse
+import io
 import json
+import os
 import warnings
+import zipfile
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from typing import Optional
@@ -193,6 +196,11 @@ _PTAX_SOURCE: bool = False
 # Date of the last available PTAX bulletin (may be yesterday outside trading hours)
 _PTAX_DATE: Optional[date] = None
 
+# ── CFTC COT (Commitment of Traders) ─────────────────────────────────────────
+COT_URL = "https://www.cftc.gov/files/dea/history/fut_fin_txt_{year}.zip"
+COT_CACHE = ".cot_cache.csv"  # local weekly cache — listed in .gitignore
+COT_MARKET = "EURO FX - CHICAGO MERCANTILE EXCHANGE"  # 57 % of DXY; best free USD proxy
+
 BCB_PTAX_URL = (
     "https://olinda.bcb.gov.br/olinda/servico/PTAX/versao/v1/odata/"
     "CotacaoDolarPeriodo(dataInicial=@dataInicial,dataFinalCotacao=@dataFinalCotacao)"
@@ -364,6 +372,94 @@ def fetch_selic(start: str) -> Optional[pd.Series]:
     except Exception as e:
         print(f"  ⚠  BCB API unavailable ({e}) — carry signal disabled")
         return None
+
+
+def _load_cot_cache() -> pd.DataFrame:
+    """Load COT cache if it exists and is less than 7 days old."""
+    if not os.path.exists(COT_CACHE):
+        return pd.DataFrame()
+    if (datetime.now().timestamp() - os.path.getmtime(COT_CACHE)) > 7 * 86400:
+        return pd.DataFrame()
+    try:
+        return pd.read_csv(COT_CACHE, index_col=0, parse_dates=True)
+    except Exception:
+        return pd.DataFrame()
+
+
+def _fetch_cot_year(year: int) -> pd.DataFrame:
+    """Download and parse one year of CFTC financial futures COT data."""
+    url = COT_URL.format(year=year)
+    req = Request(url, headers={"User-Agent": "cambio/1.0"})
+    zip_bytes = urlopen(req, timeout=45).read()
+    with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
+        txt = next(n for n in zf.namelist() if n.lower().endswith((".txt", ".csv")))
+        with zf.open(txt) as f:
+            return pd.read_csv(f, low_memory=False)
+
+
+def fetch_cot_eur(start: str) -> Optional[pd.Series]:
+    """
+    Fetch CFTC Commitment of Traders — leveraged-money net position in EUR/USD futures.
+
+    EUR/USD is the best free proxy for broad USD sentiment: EUR is 57 % of DXY and the
+    CME EUR futures are the most liquid FX contract with COT data.
+
+    Interpretation (from a USD/BRL perspective):
+      Net LONG  EUR → hedge funds short USD → USD likely to weaken → USD/BRL down → NOW
+      Net SHORT EUR → hedge funds long  USD → USD likely to strengthen → USD/BRL up → WAIT
+
+    Data: weekly (published every Tuesday for the previous Friday).
+    Cached locally for 7 days in COT_CACHE to avoid redundant downloads.
+    Forward-filled to business-day frequency for walk-forward slicing.
+    """
+    cache = _load_cot_cache()
+
+    if cache.empty:
+        start_year = int(start[:4])
+        current_year = datetime.now().year
+        frames: list[pd.DataFrame] = []
+
+        print("  Fetching CFTC COT data (USD sentiment, ~30 s)...")
+        for year in range(start_year, current_year + 1):
+            try:
+                df = _fetch_cot_year(year)
+                eur = df[
+                    df["Market_and_Exchange_Names"]
+                    .astype(str)
+                    .str.contains(COT_MARKET, na=False)
+                ].copy()
+                if eur.empty:
+                    continue
+
+                eur = eur.sort_values("Report_Date_as_YYYY-MM-DD")
+                eur["net"] = pd.to_numeric(
+                    eur["Lev_Money_Positions_Long_All"], errors="coerce"
+                ) - pd.to_numeric(eur["Lev_Money_Positions_Short_All"], errors="coerce")
+                eur["oi"] = pd.to_numeric(eur["Open_Interest_All"], errors="coerce")
+                eur.index = pd.DatetimeIndex(eur["Report_Date_as_YYYY-MM-DD"])
+                frames.append(eur[["net", "oi"]].dropna())
+                print(f"  ✓  COT {year}: {len(eur)} weeks")
+            except Exception as exc:
+                print(f"  ⚠  COT {year}: {exc}")
+
+        if not frames:
+            print("  ⚠  COT unavailable — USD sentiment signal disabled")
+            return None
+
+        cache = pd.concat(frames)
+        cache = cache[~cache.index.duplicated(keep="last")].sort_index()
+        try:
+            cache.to_csv(COT_CACHE)
+        except Exception:
+            pass  # non-fatal if we can't write cache
+
+    if cache.empty or "net" not in cache.columns:
+        return None
+
+    net = cache["net"].dropna()
+    # Forward-fill weekly reports to business days for walk-forward slicing
+    full_range = pd.date_range(net.index.min(), datetime.now(), freq="B")
+    return net.reindex(full_range).ffill().dropna().rename("cot_eur_net")
 
 
 def build_carry_diff(
@@ -1057,6 +1153,16 @@ def main() -> None:
         else:
             print("  ⚠  carry signal disabled (BCB or ^IRX unavailable)")
 
+        cot_eur = fetch_cot_eur(warmup)
+        if cot_eur is not None:
+            all_data["cot_eur"] = cot_eur
+            print(
+                f"  ✓  cot_eur      — {len(cot_eur)} days  "
+                f"(latest net {cot_eur.iloc[-1]:+,.0f} contracts)"
+            )
+        else:
+            print("  ⚠  COT signal disabled (CFTC unavailable)")
+
         rows = run_backtest(all_data, carry_diff, check_days)
         scenarios = sequential_sim(rows, check_days)
         render_backtest(rows, scenarios, check_days)
@@ -1073,6 +1179,10 @@ def main() -> None:
         print("  Fetching SELIC from BCB ...")
         selic = fetch_selic(start)
         carry_diff = build_carry_diff(selic, data.get("us_rate"))
+
+        cot_eur = fetch_cot_eur(start)
+        if cot_eur is not None:
+            data["cot_eur"] = cot_eur
 
         result = build_signals(data, carry_diff)
         if isinstance(result, tuple):

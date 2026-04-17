@@ -20,23 +20,26 @@ import pandas as pd
 
 # ── Weights ───────────────────────────────────────────────────────────────────
 WEIGHTS = {
-    # momentum (~42%)
-    "dxy": 0.12,
-    "brent": 0.07,
+    # momentum (~39%)
+    "dxy": 0.11,
+    "brent": 0.06,
     "vale": 0.05,
     "vix": 0.09,
     "ibov": 0.07,
     # carry (~5%)
     "carry": 0.05,
-    # mean-reversion / peak-detection (~37%)
-    "level": 0.12,
-    "rsi": 0.14,
-    "bb": 0.10,
+    # mean-reversion / peak-detection (~34%)
+    "level": 0.10,
+    "rsi": 0.12,
+    "bb": 0.09,
     # medium-term USD/BRL trend (~9%)
-    "usdbrl_trend": 0.10,
-    # CME BRL futures positioning (~9%)
+    "usdbrl_trend": 0.09,
+    # CME BRL futures positioning (~8%)
     # 6L is BRL/USD (inverse of USD/BRL); rising = institutions buying BRL
-    "six_l": 0.09,
+    "six_l": 0.08,
+    # CFTC COT — leveraged-money EUR/USD net position (~7%)
+    # EUR is 57 % of DXY; net long EUR = specs short USD = USD bearish = NOW
+    "cot_eur": 0.09,
 }
 assert abs(sum(WEIGHTS.values()) - 1.0) < 1e-9, "WEIGHTS must sum to 1.0"
 
@@ -469,6 +472,68 @@ def build_signals(
                 score=mom,  # positive = net buying BRL = NOW
                 note=pos_note,
                 weight=WEIGHTS["six_l"],
+            )
+        )
+
+    # ── 12. CFTC COT — USD sentiment via EUR futures (leveraged money) ────────
+    # Hedge funds net position in EUR/USD futures (CME 6E) proxies broad USD bets.
+    # Net LONG  EUR → specs are short USD → USD expected to weaken → USD/BRL falls → NOW
+    # Net SHORT EUR → specs are long  USD → USD expected to strengthen → USD/BRL rises → WAIT
+    # Published weekly. Forward-filled to daily frequency.
+    if "cot_eur" in data:
+        cot = data["cot_eur"]
+
+        cur_net = float(cot.iloc[-1])
+
+        # Score = blend of three components so the arrow always matches the note:
+        #   40 % absolute direction  — raw net position (long EUR = bearish USD = NOW)
+        #   30 % z-level             — how extreme vs 2-year history
+        #   30 % z-trend             — is positioning building or unwinding?
+        # EUR net typically ranges ±150k contracts; normalise to [-1, 1] with ±75k = ±1
+        ABS_SCALE = 75_000.0
+        abs_dir = float(np.clip(cur_net / ABS_SCALE, -1.0, 1.0))
+
+        window = min(len(cot), 504)  # ~2 years of business days
+        mean = float(cot.rolling(window).mean().iloc[-1])
+        std = float(cot.rolling(window).std().iloc[-1])
+        if std < 1 or np.isnan(std):
+            z_level, z_trend = 0.0, 0.0
+        else:
+            z_level = float(np.clip((cur_net - mean) / std / 2.0, -1.0, 1.0))
+            z_trend = z_momentum(cot)  # is positioning building or unwinding?
+
+        combined = 0.4 * abs_dir + 0.3 * z_level + 0.3 * z_trend
+        cot_score = float(np.clip(combined, -1.0, 1.0))
+
+        net_k = f"{cur_net / 1000:+.0f}k"
+        NEUTRAL_THRESHOLD = 10_000  # below ±10k contracts = effectively zero
+
+        if cur_net > NEUTRAL_THRESHOLD:
+            pos_str = f"net-long EUR ({net_k})  →  specs short USD"
+            usd_str = "USD bearish — USD/BRL likely to fall"
+        elif cur_net < -NEUTRAL_THRESHOLD:
+            pos_str = f"net-short EUR ({net_k})  →  specs long USD"
+            usd_str = "USD bullish — USD/BRL likely to rise"
+        else:
+            pos_str = f"near-neutral EUR ({net_k})  →  no directional USD bet"
+            usd_str = "no clear signal"
+
+        if abs(cot_score) > 0.45:
+            strength = "strong"
+        elif abs(cot_score) > 0.20:
+            strength = "moderate"
+        else:
+            strength = "weak"
+
+        cot_note = f"specs {pos_str}  [{strength} signal]  {usd_str}"
+
+        signals.append(
+            Signal(
+                name="COT USD (EUR specs)",
+                raw=cur_net,
+                score=cot_score,
+                note=cot_note,
+                weight=WEIGHTS["cot_eur"],
             )
         )
 

@@ -33,3 +33,6 @@ Thumbs.db
 # Secrets / env
 .env
 *.env
+
+# Local data caches
+.cot_cache.csv
