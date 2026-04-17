@@ -180,6 +180,7 @@ TICKERS = {
     "vix": "^VIX",
     "ibov": "^BVSP",
     "us_rate": "^IRX",  # 13-week T-bill (FFR proxy, % per year)
+    "six_l": "6L=F",  # CME BRL/USD futures — institutional positioning signal
 }
 
 BCB_URL = (

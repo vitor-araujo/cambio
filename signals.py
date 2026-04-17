@@ -20,20 +20,23 @@ import pandas as pd
 
 # ── Weights ───────────────────────────────────────────────────────────────────
 WEIGHTS = {
-    # momentum (~46%)
-    "dxy": 0.14,
-    "brent": 0.08,
-    "vale": 0.06,
-    "vix": 0.10,
-    "ibov": 0.08,
-    # carry (~5%) — kept low so peak-detection signals can dominate
+    # momentum (~42%)
+    "dxy": 0.12,
+    "brent": 0.07,
+    "vale": 0.05,
+    "vix": 0.09,
+    "ibov": 0.07,
+    # carry (~5%)
     "carry": 0.05,
-    # mean-reversion / peak-detection (~39%)
-    "level": 0.13,
-    "rsi": 0.15,
-    "bb": 0.11,
-    # medium-term USD/BRL trend (~10%)
+    # mean-reversion / peak-detection (~37%)
+    "level": 0.12,
+    "rsi": 0.14,
+    "bb": 0.10,
+    # medium-term USD/BRL trend (~9%)
     "usdbrl_trend": 0.10,
+    # CME BRL futures positioning (~9%)
+    # 6L is BRL/USD (inverse of USD/BRL); rising = institutions buying BRL
+    "six_l": 0.09,
 }
 assert abs(sum(WEIGHTS.values()) - 1.0) < 1e-9, "WEIGHTS must sum to 1.0"
 
@@ -424,5 +427,38 @@ def build_signals(
             weight=WEIGHTS["usdbrl_trend"],
         )
     )
+
+    # ── 11. CME BRL Futures (6L) — institutional positioning ─────────────────
+    # 6L is quoted as USD per BRL (e.g. 0.2001 = 1 BRL buys $0.2001).
+    # Rising 6L → institutions buying BRL futures → expect USD/BRL to fall → NOW
+    # Falling 6L → institutions selling BRL futures → expect USD/BRL to rise → WAIT
+    # Answers: "is the market buying the dip or buying the rise of the FX rate?"
+    if "six_l" in data:
+        six_l = data["six_l"]
+        mom = z_momentum(six_l)
+        cur_6l = float(six_l.iloc[-1])
+        implied_usdbrl = 1.0 / cur_6l if cur_6l > 0 else 0.0
+        ma20_6l = float(six_l.rolling(LONG_MA).mean().iloc[-1])
+        implied_ma = 1.0 / ma20_6l if ma20_6l > 0 else 0.0
+
+        if mom > 0.15:
+            pos_note = "↑ institutions buying BRL — expecting USD/BRL to fall"
+        elif mom < -0.15:
+            pos_note = "↓ institutions selling BRL — expecting USD/BRL to rise"
+        else:
+            pos_note = "→ neutral positioning"
+
+        signals.append(
+            Signal(
+                name="BRL Futures (6L)",
+                raw=implied_usdbrl,
+                score=mom,  # positive = buying BRL = NOW
+                note=(
+                    f"R${implied_usdbrl:.4f} implied  "
+                    f"(MA20 R${implied_ma:.4f})  {pos_note}"
+                ),
+                weight=WEIGHTS["six_l"],
+            )
+        )
 
     return signals, regime
