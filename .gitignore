@@ -36,3 +36,7 @@ Thumbs.db
 
 # Local data caches
 .cot_cache.csv
+
+# Local journal & alert artifacts
+.fx_journal.csv
+.fx_alert.html

@@ -11,7 +11,9 @@
 
 You receive a USD payment. You need BRL. Do you convert today, or wait?
 
-**cambio** fetches live market data, runs 10 quant signals across macro, technical, and carry dimensions, and gives you a probability-graded answer — calibrated to *your* payment schedule.
+**cambio** fetches live market data, runs 10+ quant signals across macro, technical, and carry dimensions, and gives you a probability-graded answer — calibrated to *your* payment schedule, your spread, and your real-world deadline. It can also sit in the background and ping you in the browser the moment the dollar looks ready to fall.
+
+> **v0.2.0** — background mode (`--watch`), browser alerts (`--notify`), local journal with self-feedback, intraday-aware signals, deadline/spread-aware backtest, three-way decision (NOW / SPLIT / WAIT).
 
 ---
 
@@ -197,7 +199,76 @@ Aguarde uns 5–10 segundos. O programa vai buscar dados de câmbio, Ibovespa, d
 
 ---
 
-### passo 6 — backtest no seu calendário (opcional mas recomendado)
+### passo 6 — alerta no navegador quando o dólar cair
+
+Em vez de ficar checando o terminal toda hora, você pode pedir pro cambio te avisar visualmente quando ele detectar uma boa janela pra converter:
+
+```bash
+.venv/bin/python fx_timing.py --lang pt --notify
+```
+
+Quando os sinais convergirem com convicção (probabilidade de "agora" ≥ 55 %), uma página HTML abre no seu navegador padrão com:
+
+- a taxa atual ao vivo
+- os 5 sinais mais relevantes do momento
+- um botão grande pra abrir o **Higlobe** e fechar o câmbio em um clique
+
+Se já abriu uma vez, ele não reabre nas próximas 6 horas (cooldown automático, evita spam).
+
+O arquivo gerado fica em `.fx_alert.html` na pasta do projeto e não vai pro Git — é só seu.
+
+---
+
+### passo 7 — deixar rodando em segundo plano
+
+A forma mais prática de usar o cambio no dia-a-dia: deixa ele rodando numa janela de terminal e ele te avisa quando precisar agir.
+
+```bash
+.venv/bin/python fx_timing.py --lang pt --watch --notify
+```
+
+O que acontece:
+
+- A cada 60 minutos (configurável com `--watch-interval`), ele rebusca os dados, recalcula tudo, registra no diário (`.fx_journal.csv`)
+- Quando o sinal vira pra **AGORA** com convicção, abre o alerta no navegador automaticamente
+- Imprime uma linha por ciclo no terminal pra você ver que está vivo:
+  ```
+  [14:32] wait          p_now=0.31  R$ 5.0810  ·
+  [15:32] exchange_now  p_now=0.62  R$ 5.1340  ◈ ALERT
+  ```
+- Pra parar: `Ctrl+C`
+
+Quer checar a cada 15 minutos em vez de 60?
+
+```bash
+.venv/bin/python fx_timing.py --lang pt --watch --notify --watch-interval 15
+```
+
+Quer trocar o nome que aparece no alerta?
+
+```bash
+.venv/bin/python fx_timing.py --lang pt --watch --notify --name "Maria"
+```
+
+> **Dica:** rode dentro do `tmux` ou de uma aba dedicada do Terminal pra não ocupar uma janela aberta o tempo todo.
+
+---
+
+### passo 8 — diário: o que o modelo disse ontem?
+
+A cada execução (live ou watch), o cambio anota a decisão num arquivo CSV local: `.fx_journal.csv`. Na próxima rodada, ele te mostra uma linha no topo dizendo se a chamada anterior estava certa:
+
+```
+último sinal há 6h: WAIT @ R$ 5.0810  → agora R$ 5.1340  (+1.04%) ✓
+```
+
+Isso te dá feedback constante — você vê com seus próprios olhos quando o modelo acerta e quando erra, sem precisar abrir planilha nenhuma. O histórico fica todo lá, em um CSV simples que você pode abrir no Excel ou no Numbers.
+
+O arquivo não vai pro Git (já está no `.gitignore`) — é só do seu computador.
+
+---
+
+### passo 9 — backtest no seu calendário (opcional mas recomendado)
 
 O backtest mostra como o modelo teria se comportado nos últimos anos nos *seus* dias específicos de decisão — porque a acurácia muda dependendo do dia do mês.
 
@@ -215,6 +286,15 @@ Se recebe no dia 10 e no dia 25:
 
 O backtest demora cerca de 2 minutos e mostra uma tabela completa com cada decisão desde 2022 e o resultado real.
 
+**Dois ajustes que valem ouro pra ser realista:**
+
+- `--deadline-days 15` — você não pode esperar pra sempre. Esse parâmetro força o câmbio depois de N dias mesmo se o sinal estiver dizendo pra aguardar (default: 15, que é ≈ 2 decisões por mês).
+- `--spread-bps 50` — sua corretora cobra um spread (Wise, Higlobe, Remessa Online … todas tiram um pedacinho). 50 = 0,50 %. O backtest desconta isso pra mostrar quanto BRL você **realmente** receberia.
+
+```bash
+.venv/bin/python fx_timing.py --lang pt --backtest --days 5 20 --deadline-days 15 --spread-bps 50
+```
+
 ---
 
 ### da próxima vez
@@ -229,12 +309,17 @@ Você não precisa repetir toda a configuração. Na próxima vez que quiser con
 
 ### resumo dos comandos
 
-| O que fazer | Mac / Linux | Windows |
-|---|---|---|
-| Análise de hoje | `.venv/bin/python fx_timing.py --lang pt` | `.venv\Scripts\python fx_timing.py --lang pt` |
-| Backtest padrão | `... --backtest` | igual |
-| Backtest no seu dia | `... --backtest --days 10` | igual |
-| Dois dias por mês | `... --backtest --days 5 20` | igual |
+| O que fazer | Comando |
+|---|---|
+| Análise de hoje | `... fx_timing.py --lang pt` |
+| Análise + alerta no navegador | `... fx_timing.py --lang pt --notify` |
+| Background, alerta automático | `... fx_timing.py --lang pt --watch --notify` |
+| Background a cada 15 min | `... fx_timing.py --lang pt --watch --notify --watch-interval 15` |
+| Backtest padrão | `... fx_timing.py --backtest` |
+| Backtest no seu dia | `... fx_timing.py --backtest --days 10` |
+| Backtest com deadline e spread | `... fx_timing.py --backtest --deadline-days 15 --spread-bps 50` |
+
+> No Mac/Linux substitua `...` por `.venv/bin/python`. No Windows, `.venv\Scripts\python`.
 
 ---
 
@@ -252,9 +337,15 @@ Você não precisa repetir toda a configuração. Na próxima vez que quiser con
 
 ## features
 
-- **10 signals** across three factor families — momentum, carry, and mean-reversion
+- **10+ signals** across three factor families — momentum, carry, and mean-reversion
 - **ADX-conditioned** RSI and Bollinger %B: mean-reversion signals auto-suppressed in trending markets
-- **Probability-graded verdicts** — language scales with confidence, never overcommits
+- **Three-way verdict** — NOW / SPLIT / WAIT, with probability-graded language
+- **Intraday-aware** — last bar is replaced with the live tick so RSI/BB/Level reflect what you're seeing right now, not yesterday's PTAX close
+- **Deadline-aware backtest** (`--deadline-days`) — forces execution after your real-world cutoff
+- **Cost-aware backtest** (`--spread-bps`) — BRL figures land net of your fintech spread
+- **Browser alerts** (`--notify`) — a serif-typeset HTML page pops open with a one-click link to Higlobe when p(NOW) is high
+- **Background mode** (`--watch`) — leave it running, get pinged on flip
+- **Journal** — every call is logged to `.fx_journal.csv` and the next run shows you whether the previous one was right
 - **Walk-forward backtest** (`--backtest`) against your own payment schedule with `--days`
 - **Português** output with `--lang pt` — made for Brazilians
 
@@ -301,10 +392,18 @@ Walk-forward, no look-ahead. Oracle = rate at the **next scheduled check date** 
 
 ```
 fx_timing.py [--backtest] [--days DAY ...] [--lang {en,pt}]
+             [--deadline-days N] [--spread-bps BPS]
+             [--notify] [--watch] [--watch-interval MIN] [--name NAME]
 
-  --backtest           walk-forward backtest since 2022
-  --days 5 20          which day(s) of month you typically decide (default: 2 17)
-  --lang pt            output in Portuguese / saída em português
+  --backtest             walk-forward backtest since 2022
+  --days 5 20            which day(s) of month you typically decide (default: 2 17)
+  --lang pt              output in Portuguese / saída em português
+  --deadline-days 15     forced execution window in days (default: 15)
+  --spread-bps 50        effective FX spread in basis points (default: 50 = 0.50 %)
+  --notify               open an HTML alert in the browser when p(NOW) is high
+  --watch                background mode — re-run on a schedule, alert on flip
+  --watch-interval 60    minutes between checks in --watch mode
+  --name Vitor           name shown in the browser alert headline
 ```
 
 ---

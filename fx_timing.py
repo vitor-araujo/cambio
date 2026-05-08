@@ -3,15 +3,20 @@
 USD/BRL Exchange Timing Model
   python fx_timing.py                  — live signal analysis
   python fx_timing.py --lang pt        — saída em português
+  python fx_timing.py --notify         — HTML alert in the browser on flip-to-NOW
+  python fx_timing.py --watch --notify — background mode with auto-alerts
   python fx_timing.py --backtest       — walk-forward backtest (2nd & 17th since 2022)
 
 pip install yfinance pandas numpy
 """
 
+__version__ = "0.2.0"
+
 import argparse
 import io
 import json
 import os
+import time
 import warnings
 import zipfile
 from dataclasses import dataclass
@@ -23,6 +28,8 @@ import numpy as np
 import pandas as pd
 import yfinance as yf
 
+import journal
+import notify
 from signals import Signal, build_signals
 
 warnings.filterwarnings("ignore")
@@ -171,9 +178,14 @@ LIVE_FETCH_DAYS = 180
 BACKTEST_START = "2022-01-01"
 ORACLE_HORIZON = 14  # days ahead for correctness evaluation
 ORACLE_THRESH = 0.003  # 0.3 % move to call it directional (next-check-date oracle)
-MAX_WAIT = 6  # max consecutive WAIT decisions
+DEFAULT_DEADLINE_DAYS = 15  # forced execution window — 2 decisions/month avg
 AMOUNT = 10_000  # USD per scenario
 REGIME_STRENGTH = 0.55  # how hard the regime filter shifts probabilities
+DEFAULT_SPREAD_BPS = 50  # 0.50 % effective spread (Wise-class fintech, pre-IOF)
+DEFAULT_USER_NAME = "Vitor"  # used in the HTML alert headline
+WATCH_INTERVAL_MIN = 60  # minutes between checks in --watch mode
+NOTIFY_THRESHOLD = 0.55  # min p_now to trigger browser alert
+NOTIFY_COOLDOWN_HOURS = 6  # don't re-open the alert within this window
 
 TICKERS = {
     # usdbrl is intentionally omitted — fetched from BCB PTAX instead of Yahoo
@@ -559,13 +571,17 @@ def apply_regime(probs: dict, regime: float) -> dict:
 
 def decide(probs: dict) -> str:
     """
-    NOW  fires when p_now > 0.51 (high-conviction peak, proven at 52 % accuracy).
-    WAIT is the conservative default for all other cases.
-    SPLIT is reserved for when p_split dominates (rare).
+    Three-way decision:
+      NOW   — p_now is the dominant probability AND clears 0.51 conviction floor.
+      SPLIT — signals materially disagree (p_split is the largest mass) OR
+              the call is a coin-flip between NOW and WAIT (|p_now - p_wait| < 0.06).
+      WAIT  — conservative default.
     """
     pn, ps, pw = probs["exchange_now"], probs["split"], probs["wait"]
-    if pn >= pw and pn >= ps and pn > 0.51:
+    if pn > 0.51 and pn >= pw and pn >= ps:
         return "exchange_now"
+    if ps >= max(pn, pw) or abs(pn - pw) < 0.06:
+        return "split"
     return "wait"
 
 
@@ -615,6 +631,34 @@ def _verdict(d: str, pn: float, pw: float) -> tuple[str, str, str]:
         return "◷", _t("vw_lo_h"), _t("vw_lo_s")
 
     return "◫", _t("vs_h"), _t("vs_s")
+
+
+def _apply_intraday(
+    data: dict[str, pd.Series],
+    live_fx: Optional[tuple[float, str]],
+) -> dict[str, pd.Series]:
+    """
+    Replace / append today's USD/BRL bar with the live intraday tick so
+    technical signals (Level, RSI, BB, Trend) reflect the rate the user is
+    actually seeing on Higlobe right now — not yesterday's PTAX close.
+
+    Idempotent: safe to call repeatedly inside the --watch loop.
+    """
+    if live_fx is None or "usdbrl" not in data:
+        return data
+    rate, _ = live_fx
+    if rate <= 0 or not np.isfinite(rate):
+        return data
+
+    series = data["usdbrl"].copy()
+    today = pd.Timestamp(date.today())
+    if not series.empty and series.index[-1].normalize() == today:
+        series.iloc[-1] = float(rate)
+    else:
+        series.loc[today] = float(rate)
+        series = series.sort_index()
+    data = {**data, "usdbrl": series}
+    return data
 
 
 def _fetch_live_fx() -> Optional[tuple[float, str]]:
@@ -900,25 +944,46 @@ class Scenario:
     brl_immediate: float
 
 
+def _max_wait_periods(check_days: tuple[int, ...], deadline_days: int) -> int:
+    """
+    Map a real-world deadline (in calendar days) to the number of subsequent
+    check-points the model is allowed to wait. With the default 2nd & 17th
+    schedule (period ≈ 15 days) and a 15-day deadline, this yields max_wait=1
+    — i.e. 2 decisions per month on average.
+    """
+    period_days = max(1, 30 // max(1, len(check_days)))
+    return max(1, deadline_days // period_days)
+
+
 def sequential_sim(
-    rows: list[Row], check_days: tuple[int, ...] = (2, 17)
+    rows: list[Row],
+    check_days: tuple[int, ...] = (2, 17),
+    deadline_days: int = DEFAULT_DEADLINE_DAYS,
+    spread_bps: int = DEFAULT_SPREAD_BPS,
 ) -> list[Scenario]:
     """
-    From each first check-day of the month, follow model decisions until NOW/SPLIT fires
-    or MAX_WAIT periods elapse, then compare BRL received vs day-1 exchange.
+    From each first check-day of the month, follow model decisions until NOW/SPLIT
+    fires or the deadline elapses, then compare BRL received vs immediate exchange.
+
+    Spread is applied symmetrically (same number of conversions on both legs),
+    so it does not move the wins/losses comparison — but the absolute BRL value
+    reported reflects what actually lands in the user's account.
     """
+    max_wait = _max_wait_periods(check_days, deadline_days)
+    fee = 1.0 - spread_bps / 10_000.0
+
     row_map = {r.date: r for r in rows}
     all_dates = sorted(row_map)
     scenarios: list[Scenario] = []
     first_day = min(check_days)  # use lowest day as the scenario start
 
     for start_d in (d for d in all_dates if d.day == first_day):
-        pool = [d for d in all_dates if d >= start_d][: MAX_WAIT + 1]
+        pool = [d for d in all_dates if d >= start_d][: max_wait + 1]
         if not pool:
             continue
 
         start_r = row_map[start_d].rate
-        execute_d = pool[-1]
+        execute_d = pool[-1]  # forced exchange at deadline
         execute_r = row_map[execute_d].rate if execute_d in row_map else None
         periods = len(pool) - 1
 
@@ -941,8 +1006,8 @@ def sequential_sim(
                 start_rate=start_r,
                 execute_rate=execute_r,
                 periods_waited=periods,
-                brl_model=AMOUNT * execute_r,
-                brl_immediate=AMOUNT * start_r,
+                brl_model=AMOUNT * execute_r * fee,
+                brl_immediate=AMOUNT * start_r * fee,
             )
         )
 
@@ -954,14 +1019,20 @@ def render_backtest(
     rows: list[Row],
     scenarios: list[Scenario],
     check_days: tuple[int, ...] = (2, 17),
+    deadline_days: int = DEFAULT_DEADLINE_DAYS,
+    spread_bps: int = DEFAULT_SPREAD_BPS,
 ) -> None:
     W = 86
     days_str = " & ".join(str(d) for d in check_days)
+    max_wait = _max_wait_periods(check_days, deadline_days)
 
     print("\n" + "═" * W)
     print(f"  USD → BRL  WALK-FORWARD BACKTEST  ({days_str} of each month since 2022)")
     print("  Signals: DXY · Brent · VALE · VIX · IBOV · Carry · Level · RSI · BB%B")
     print("  Regime:  ADX(14) trend filter applied to final probabilities")
+    print(
+        f"  Deadline: {deadline_days}d (max {max_wait} wait period{'s' if max_wait != 1 else ''})  ·  Spread: {spread_bps / 100:.2f}%"
+    )
     print("═" * W)
 
     # ── Decision table
@@ -1079,11 +1150,173 @@ def render_backtest(
     print()
 
 
-# ── Main ──────────────────────────────────────────────────────────────────────
+# ── Main ───────────────────────────────────────────────────────────────────────
 def _print_fetch_status(data: dict[str, pd.Series]) -> None:
     for k, v in data.items():
         if not k.endswith(("_high", "_low")):
             print(f"  ✓  {k:<12} — {len(v)} trading days")
+
+
+def _build_journal_entry(
+    probs: dict,
+    decision: str,
+    rate_signal: float,
+    rate_live: Optional[float],
+    notified: bool,
+) -> journal.Entry:
+    return journal.Entry(
+        ts=datetime.now(),
+        rate_signal=rate_signal,
+        rate_live=rate_live,
+        decision=decision,
+        p_now=probs["exchange_now"],
+        p_split=probs["split"],
+        p_wait=probs["wait"],
+        composite=probs["composite"],
+        agreement=probs["agreement"],
+        regime=probs.get("regime", 0.0),
+        notified=notified,
+    )
+
+
+def _maybe_notify(
+    sigs: list[Signal],
+    probs: dict,
+    decision: str,
+    live_fx: Optional[tuple[float, str]],
+    user_name: str,
+) -> bool:
+    """Fire the browser alert when conviction is high and cooldown elapsed."""
+    if not journal.should_notify(
+        decision,
+        probs["exchange_now"],
+        threshold=NOTIFY_THRESHOLD,
+        cooldown_hours=NOTIFY_COOLDOWN_HOURS,
+    ):
+        return False
+
+    rate_for_alert = (
+        live_fx[0]
+        if live_fx
+        else next((s.raw for s in sigs if s.name == "USD/BRL Level"), 0.0)
+    )
+    top = sorted(sigs, key=lambda s: abs(s.score) * s.weight, reverse=True)[:5]
+    top_signals = [(s.name, s.score) for s in top]
+
+    return notify.alert(
+        name=user_name,
+        rate_live=float(rate_for_alert),
+        p_now=probs["exchange_now"],
+        composite=probs["composite"],
+        agreement=probs["agreement"],
+        regime=probs.get("regime", 0.0),
+        top_signals=top_signals,
+    )
+
+
+def _run_live_cycle(
+    args,
+    *,
+    render: bool = True,
+    refetch: bool = True,
+    cache: Optional[dict] = None,
+) -> dict:
+    """
+    Single live-analysis pass. Returns a dict with the cycle outcome so the
+    --watch loop can reuse fetched data on subsequent ticks.
+    """
+    if refetch or cache is None:
+        start = (datetime.now() - timedelta(days=LIVE_FETCH_DAYS)).strftime("%Y-%m-%d")
+        if render:
+            print("\n  Fetching market data...")
+        data = fetch(start)
+        if not data:
+            print("  ERROR: no data fetched — check connectivity.\n")
+            return {"ok": False}
+        if render:
+            _print_fetch_status(data)
+            print("  Fetching SELIC from BCB ...")
+        selic = fetch_selic(start)
+        carry_diff = build_carry_diff(selic, data.get("us_rate"))
+        cot_eur = fetch_cot_eur(start)
+        if cot_eur is not None:
+            data["cot_eur"] = cot_eur
+        cache = {"data": data, "carry_diff": carry_diff}
+    else:
+        data = cache["data"]
+        carry_diff = cache["carry_diff"]
+
+    # Always refresh the live tick — cheap, ~50 ms
+    live_fx = _fetch_live_fx()
+    data_live = _apply_intraday(data, live_fx)
+
+    result = build_signals(data_live, carry_diff)
+    sigs, regime = result if isinstance(result, tuple) else (result, 0.0)
+
+    probs = probabilities(sigs)
+    probs = apply_regime(probs, regime)
+    decision = decide(probs)
+
+    rate_signal = float(data_live["usdbrl"].iloc[-1])
+    rate_live = float(live_fx[0]) if live_fx else None
+
+    if render:
+        prev = journal.last_entry()
+        summary = journal.render_summary(prev, rate_live or rate_signal)
+        if summary:
+            print(f"\n  {summary}")
+        render_live(sigs, probs, live_fx=live_fx)
+
+    notified = False
+    if args.notify:
+        notified = _maybe_notify(sigs, probs, decision, live_fx, args.name)
+        if notified and render:
+            print("  ◈  alerta aberto no navegador — abre Higlobe e converte agora.\n")
+
+    journal.append(
+        _build_journal_entry(probs, decision, rate_signal, rate_live, notified)
+    )
+
+    return {
+        "ok": True,
+        "cache": cache,
+        "decision": decision,
+        "probs": probs,
+        "rate_live": rate_live,
+        "notified": notified,
+    }
+
+
+def _watch_loop(args) -> None:
+    """Background mode: refresh signals on a schedule, fire alerts on flip-to-NOW."""
+    interval = max(5, args.watch_interval) * 60  # seconds
+    print(
+        f"\n  ◉  watch mode · a cada {args.watch_interval} min · "
+        f"alerta abre Higlobe quando p(agora) ≥ {NOTIFY_THRESHOLD:.0%}"
+    )
+    print("  Ctrl+C para parar.\n")
+    cache: Optional[dict] = None
+    cycle = 0
+    while True:
+        try:
+            cycle += 1
+            refetch = cycle % 6 == 1  # full refetch ~hourly when interval=10min
+            res = _run_live_cycle(args, render=False, refetch=refetch, cache=cache)
+            if res["ok"]:
+                cache = res["cache"]
+                ts = datetime.now().strftime("%H:%M")
+                d = res["decision"]
+                pn = res["probs"]["exchange_now"]
+                rate = res["rate_live"] or 0.0
+                tag = "◈ ALERT" if res["notified"] else "·"
+                print(f"  [{ts}] {d:<13} p_now={pn:.2f}  R$ {rate:.4f}  {tag}")
+            time.sleep(interval)
+        except KeyboardInterrupt:
+            print("\n  watch interrompido.\n")
+            return
+        except Exception as e:
+            print(f"  ⚠  ciclo falhou ({e}) — retentando em {args.watch_interval} min")
+            time.sleep(interval)
 
 
 def main() -> None:
@@ -1093,9 +1326,11 @@ def main() -> None:
         epilog="""examples:
   python fx_timing.py                        live analysis, run any day
   python fx_timing.py --lang pt              saída em português
+  python fx_timing.py --notify               opens HTML alert when p(now) is high
+  python fx_timing.py --watch --notify       run in background, alert on flip
   python fx_timing.py --backtest             backtest on default schedule (2nd & 17th)
   python fx_timing.py --backtest --days 5 20 backtest on your own schedule (5th & 20th)
-  python fx_timing.py --backtest --days 15   backtest on a single day per month""",
+  python fx_timing.py --backtest --deadline-days 15  enforce 15-day deadline""",
     )
     parser.add_argument(
         "--backtest",
@@ -1116,6 +1351,44 @@ def main() -> None:
         choices=["en", "pt"],
         default="en",
         help="Output language: en (default) or pt (português)",
+    )
+    parser.add_argument(
+        "--deadline-days",
+        type=int,
+        default=DEFAULT_DEADLINE_DAYS,
+        metavar="N",
+        help=f"Forced execution window in days (default: {DEFAULT_DEADLINE_DAYS}). "
+        "Backtest waits at most this long before exchanging anyway.",
+    )
+    parser.add_argument(
+        "--spread-bps",
+        type=int,
+        default=DEFAULT_SPREAD_BPS,
+        metavar="BPS",
+        help=f"Effective FX spread in basis points (default: {DEFAULT_SPREAD_BPS} = 0.50%%).",
+    )
+    parser.add_argument(
+        "--notify",
+        action="store_true",
+        help="Open an HTML alert in the default browser when p(now) is high.",
+    )
+    parser.add_argument(
+        "--watch",
+        action="store_true",
+        help="Background mode: re-run on a schedule and notify on flip.",
+    )
+    parser.add_argument(
+        "--watch-interval",
+        type=int,
+        default=WATCH_INTERVAL_MIN,
+        metavar="MIN",
+        help=f"Minutes between checks in --watch mode (default: {WATCH_INTERVAL_MIN}).",
+    )
+    parser.add_argument(
+        "--name",
+        type=str,
+        default=DEFAULT_USER_NAME,
+        help=f"Name shown in the browser alert (default: {DEFAULT_USER_NAME}).",
     )
     args = parser.parse_args()
 
@@ -1164,38 +1437,18 @@ def main() -> None:
             print("  ⚠  COT signal disabled (CFTC unavailable)")
 
         rows = run_backtest(all_data, carry_diff, check_days)
-        scenarios = sequential_sim(rows, check_days)
-        render_backtest(rows, scenarios, check_days)
+        scenarios = sequential_sim(
+            rows, check_days, args.deadline_days, args.spread_bps
+        )
+        render_backtest(
+            rows, scenarios, check_days, args.deadline_days, args.spread_bps
+        )
+
+    elif args.watch:
+        _watch_loop(args)
 
     else:
-        start = (datetime.now() - timedelta(days=LIVE_FETCH_DAYS)).strftime("%Y-%m-%d")
-        print("\n  Fetching market data...")
-        data = fetch(start)
-        if not data:
-            print("  ERROR: no data fetched — check connectivity.\n")
-            return
-        _print_fetch_status(data)
-
-        print("  Fetching SELIC from BCB ...")
-        selic = fetch_selic(start)
-        carry_diff = build_carry_diff(selic, data.get("us_rate"))
-
-        cot_eur = fetch_cot_eur(start)
-        if cot_eur is not None:
-            data["cot_eur"] = cot_eur
-
-        result = build_signals(data, carry_diff)
-        if isinstance(result, tuple):
-            sigs, regime = result
-        else:
-            sigs, regime = result, 0.0
-
-        probs = probabilities(sigs)
-        probs = apply_regime(probs, regime)
-
-        # Fetch live intraday rate for header display (separate from PTAX signal data)
-        live_fx = _fetch_live_fx()
-        render_live(sigs, probs, live_fx=live_fx)
+        _run_live_cycle(args)
 
 
 if __name__ == "__main__":
