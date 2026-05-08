@@ -1,84 +1,152 @@
 <p align="center">
   <h1 align="center">cambio</h1>
-  <p align="center">quantitative timing for USD → BRL exchanges</p>
+  <p align="center">timing quantitativo para câmbio USD → BRL</p>
   <p align="center">
     <a href="https://github.com/vitor-araujo/cambio/blob/main/LICENSE"><img alt="MIT" src="https://img.shields.io/badge/license-MIT-22c55e?style=flat-square"></a>
     <img alt="Python" src="https://img.shields.io/badge/python-3.10+-4B8BBE?style=flat-square&logo=python&logoColor=white">
-    <img alt="no API key" src="https://img.shields.io/badge/data-free%20·%20no%20API%20key-f59e0b?style=flat-square">
-    <img alt="en · pt" src="https://img.shields.io/badge/lang-en%20·%20pt--BR-6366f1?style=flat-square">
+    <img alt="sem API key" src="https://img.shields.io/badge/dados-grátis%20·%20sem%20API%20key-f59e0b?style=flat-square">
+    <img alt="pt · en" src="https://img.shields.io/badge/lang-pt--BR%20·%20en-6366f1?style=flat-square">
   </p>
 </p>
 
-You receive a USD payment. You need BRL. Do you convert today, or wait?
+Você recebeu um pagamento em dólar. Precisa de real. Converte hoje, ou espera?
 
-**cambio** fetches live market data, runs 10+ quant signals across macro, technical, and carry dimensions, and gives you a probability-graded answer — calibrated to *your* payment schedule, your spread, and your real-world deadline. It can also sit in the background and ping you in the browser the moment the dollar looks ready to fall.
+O **cambio** busca dados de mercado ao vivo, roda 10+ sinais quantitativos (momentum, carry, reversão à média) e te dá uma resposta probabilística — calibrada pro *seu* calendário de pagamentos, *seu* spread e *seu* prazo real. Pode ficar rodando em segundo plano e te avisar no navegador no momento em que o dólar parecer que vai cair.
 
-> **v0.2.0** — background mode (`--watch`), browser alerts (`--notify`), local journal with self-feedback, intraday-aware signals, deadline/spread-aware backtest, three-way decision (NOW / SPLIT / WAIT).
+> **v0.2.0** — modo background (`--watch`), alertas no navegador (`--notify`), diário local com auto-feedback, sinais com ajuste intraday, backtest ciente de prazo e spread, decisão em três vias (AGORA / DIVIDIR / AGUARDAR).
 
 ---
 
 ```
 ══════════════════════════════════════════════════════════════════
-  USD → BRL   EXCHANGE TIMING MODEL
+  USD → BRL   MODELO DE TIMING DE CÂMBIO
   2025-06-02   ·   R$ 5.7208
 ══════════════════════════════════════════════════════════════════
 
-  Trend Regime:  no clear trend  (mean-reversion signals fully active)
+  Regime de Tendência:  sem tendência clara  (sinais de reversão à média ativos)
 
-  SIGNALS                      ← WAIT   NOW →   score    wt
+  SINAIS                       ← AGUARDAR  AGORA →   score    peso
   ────────────────────────────────────────────────────────────────
-  DXY                |                |  -0.12  14%  [WAIT]
-  Brent              |        ▶▶▶     |  +0.41   8%  [NOW ]
-  VALE               |        ▶▶▶     |  +0.50   6%  [NOW ]
-  VIX                |                |  -0.08  10%  [FLAT]
-  IBOV               |        ▶▶▶     |  +0.44   8%  [NOW ]
-  Carry (SELIC−FFR)  |    ◀◀◀         |  -0.52   5%  [WAIT]
-  USD/BRL Level      |  ◀◀◀           |  -0.40  13%  [WAIT]
-  RSI(14)            |        ▶▶▶▶    |  +0.55  15%  [NOW ]
-  Bollinger %B       |        ▶▶▶▶    |  +0.64  11%  [NOW ]
-  USD/BRL Trend      |                |  +0.06  10%  [FLAT]
+  DXY                |                |  -0.12  14%  [AGU.]
+  Brent              |        ▶▶▶     |  +0.41   8%  [AGORA]
+  VALE               |        ▶▶▶     |  +0.50   6%  [AGORA]
+  VIX                |                |  -0.08  10%  [NEUT]
+  IBOV               |        ▶▶▶     |  +0.44   8%  [AGORA]
+  Carry (SELIC−FFR)  |    ◀◀◀         |  -0.52   5%  [AGU.]
+  USD/BRL Level      |  ◀◀◀           |  -0.40  13%  [AGU.]
+  RSI(14)            |        ▶▶▶▶    |  +0.55  15%  [AGORA]
+  Bollinger %B       |        ▶▶▶▶    |  +0.64  11%  [AGORA]
+  USD/BRL Trend      |                |  +0.06  10%  [NEUT]
 
-  Composite: +0.178   Agreement: 60%   Regime adj: +0.00
+  Composto: +0.178   Concordância: 60%   Ajuste regime: +0.00
 
-  PROBABILITY DISTRIBUTION
+  DISTRIBUIÇÃO DE PROBABILIDADE
   ────────────────────────────────────────────────────────────────
-  Exchange Now   58.2%  [████████████████████░░░░░░░░░░░░░░]
-  Split 50/50    12.9%  [████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░]
-  Wait           28.9%  [██████████░░░░░░░░░░░░░░░░░░░░░░░░]
+  Câmbio Agora   58.2%  [████████████████████░░░░░░░░░░░░░░]
+  Dividir 50/50  12.9%  [████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░]
+  Aguardar       28.9%  [██████████░░░░░░░░░░░░░░░░░░░░░░░░]
   ────────────────────────────────────────────────────────────────
 
-  ◈  signals lean toward exchanging now
-     Multiple indicators suggest the current rate may be near a
-     local high. This is not a guarantee — past signal accuracy
-     has been ~58% on this call.
+  ◈  os sinais indicam uma possível oportunidade de câmbio agora
+     Múltiplos indicadores sugerem que a taxa atual pode estar
+     próxima de uma máxima local. Isso não é garantia — a acurácia
+     histórica deste sinal foi de ~58 %.
 
-  Time horizon note:
-    < 7 days   execute regardless — timing models don't help at this horizon
-    7–30 days  the signal above is most relevant in this window
-    > 30 days  consider weighting WAIT more; more time = more optionality
-
-  ⚠  Past signal accuracy is no guarantee of future results.
-     This tool does not constitute financial or investment advice.
+  ⚠  A acurácia histórica do modelo não garante resultados futuros.
+     Esta ferramenta não constitui aconselhamento financeiro.
 ══════════════════════════════════════════════════════════════════
 ```
 
 ---
 
-## quick start
+## início rápido
 
 ```bash
 git clone https://github.com/vitor-araujo/cambio.git && cd cambio
 python3 -m venv .venv && .venv/bin/pip install -q yfinance pandas numpy
-.venv/bin/python fx_timing.py
+.venv/bin/python fx_timing.py --lang pt
 ```
 
-No API keys. Pulls live data from Yahoo Finance and the [BCB open API](https://dadosabertos.bcb.gov.br/).
+Sem API keys. Os dados vêm do Yahoo Finance e da [API aberta do Banco Central](https://dadosabertos.bcb.gov.br/).
 
 ---
 
-## como usar — guia para leigos 🇧🇷
+## funcionalidades
 
-Nunca mexeu com programação? Sem problema. Esse guia assume que você parte do zero.
+- **10+ sinais** em três famílias — momentum, carry e reversão à média
+- **ADX-condicionado** — RSI e Bollinger %B reduzem peso automaticamente em mercado de tendência forte
+- **Três decisões possíveis** — AGORA, DIVIDIR (50/50) ou AGUARDAR, com linguagem graduada por convicção
+- **Ajuste intraday** — a última barra é substituída pela cotação ao vivo, então RSI / BB / Level refletem o preço atual e não o fechamento PTAX de ontem
+- **Backtest com prazo real** (`--deadline-days`) — força o câmbio depois do seu prazo limite
+- **Backtest com custo** (`--spread-bps`) — os valores em BRL saem líquidos do spread da sua corretora
+- **Alerta no navegador** (`--notify`) — uma página HTML com tipografia serifada e link direto pra Higlobe abre quando a p(AGORA) está alta
+- **Modo background** (`--watch`) — deixa rodando e recebe um ping quando o sinal vira
+- **Diário local** — toda execução fica registrada em `.fx_journal.csv` e a próxima rodada te mostra se a chamada anterior estava certa
+- **Backtest walk-forward** (`--backtest`) no *seu* calendário de pagamentos via `--days`
+- Saída em **português** com `--lang pt`
+
+---
+
+## sinais
+
+| Família | Sinal | Peso | Lógica |
+|---|---|---|---|
+| **Momentum** | Índice DXY | 14% | subindo → dólar mais forte → aguardar |
+| | Brent (petróleo) | 8% | subindo → boost de commodities → agora |
+| | VALE (minério) | 6% | subindo → balança comercial Brasil → agora |
+| | VIX | 10% | elevado + subindo → risk-off → aguardar |
+| | IBOVESPA | 8% | subindo → otimismo Brasil → agora |
+| **Carry** | SELIC − FFR | 5% | diferencial alto → BRL atrativo → aguardar |
+| **Reversão** | RSI(14) | 15% | >70 sobrecomprado → agora · <30 sobrevendido → aguardar |
+| | Bollinger %B | 11% | perto da banda superior → agora · inferior → aguardar |
+| | USD/BRL percentil | 13% | máxima de vários anos → agora |
+| | Inclinação MA 30d | 10% | subindo → aguardar · caindo → agora |
+
+O RSI e o Bollinger %B têm o peso reduzido em até 70 % quando o ADX detecta tendência forte — pra evitar chamar reversão contra um momentum em andamento.
+
+---
+
+## backtest
+
+Walk-forward, sem look-ahead. O *oracle* compara a taxa de hoje com a taxa do **próximo dia de checagem agendado** — não com um preço intraday teórico que você não conseguiria executar.
+
+| Calendário | Acurácia AGORA | Acurácia AGUARDAR | Decisões |
+|---|---|---|---|
+| Dias 2 e 17 (padrão) | 58,3 % | 44,4 % | 102 |
+| Dias 5 e 20 | **75,0 %** | 42,2 % | 103 |
+
+**A acurácia muda dependendo do calendário.** Rode o backtest nos *seus* dias reais de recebimento antes de confiar no modelo.
+
+```bash
+# testa o seu calendário, com prazo e spread realistas
+.venv/bin/python fx_timing.py --lang pt --backtest --days 5 20 --deadline-days 15 --spread-bps 50
+```
+
+---
+
+## opções
+
+```
+fx_timing.py [--backtest] [--days DIA ...] [--lang {en,pt}]
+             [--deadline-days N] [--spread-bps BPS]
+             [--notify] [--watch] [--watch-interval MIN] [--name NOME]
+
+  --backtest             backtest walk-forward desde 2022
+  --days 5 20            dia(s) do mês em que você decide (padrão: 2 17)
+  --lang pt              saída em português / output in Portuguese
+  --deadline-days 15     prazo limite em dias (padrão: 15)
+  --spread-bps 50        spread efetivo em basis points (padrão: 50 = 0,50 %)
+  --notify               abre alerta HTML no navegador quando p(AGORA) é alta
+  --watch                modo background — re-roda em loop e alerta no flip
+  --watch-interval 60    minutos entre checagens em --watch (padrão: 60)
+  --name Vitor           nome no cabeçalho do alerta no navegador
+```
+
+---
+
+## guia completo para leigos 🇧🇷
+
+Nunca mexeu com programação? Sem problema. Esse guia parte do zero.
 
 O **cambio** é um script Python — um programinha de terminal que roda no seu computador, busca os dados na internet e te diz o resultado. Não tem site, não tem app, não tem instalador. Você vai digitar alguns comandos, e só.
 
@@ -288,7 +356,7 @@ O backtest demora cerca de 2 minutos e mostra uma tabela completa com cada decis
 
 **Dois ajustes que valem ouro pra ser realista:**
 
-- `--deadline-days 15` — você não pode esperar pra sempre. Esse parâmetro força o câmbio depois de N dias mesmo se o sinal estiver dizendo pra aguardar (default: 15, que é ≈ 2 decisões por mês).
+- `--deadline-days 15` — você não pode esperar pra sempre. Esse parâmetro força o câmbio depois de N dias mesmo se o sinal estiver dizendo pra aguardar (padrão: 15, que é ≈ 2 decisões por mês).
 - `--spread-bps 50` — sua corretora cobra um spread (Wise, Higlobe, Remessa Online … todas tiram um pedacinho). 50 = 0,50 %. O backtest desconta isso pra mostrar quanto BRL você **realmente** receberia.
 
 ```bash
@@ -335,23 +403,57 @@ Você não precisa repetir toda a configuração. Na próxima vez que quiser con
 
 ---
 
-## features
+## contribuindo
 
-- **10+ signals** across three factor families — momentum, carry, and mean-reversion
-- **ADX-conditioned** RSI and Bollinger %B: mean-reversion signals auto-suppressed in trending markets
-- **Three-way verdict** — NOW / SPLIT / WAIT, with probability-graded language
-- **Intraday-aware** — last bar is replaced with the live tick so RSI/BB/Level reflect what you're seeing right now, not yesterday's PTAX close
-- **Deadline-aware backtest** (`--deadline-days`) — forces execution after your real-world cutoff
-- **Cost-aware backtest** (`--spread-bps`) — BRL figures land net of your fintech spread
-- **Browser alerts** (`--notify`) — a serif-typeset HTML page pops open with a one-click link to Higlobe when p(NOW) is high
-- **Background mode** (`--watch`) — leave it running, get pinged on flip
-- **Journal** — every call is logged to `.fx_journal.csv` and the next run shows you whether the previous one was right
-- **Walk-forward backtest** (`--backtest`) against your own payment schedule with `--days`
-- **Português** output with `--lang pt` — made for Brazilians
+PRs são bem-vindos. Direções de alto valor:
+
+- CDS 5Y do Brasil ou spread do EMBI+ como sinal de risco soberano
+- Calendário do COPOM como filtro de eventos de volatilidade
+- Momentum cross-sectional de FX em emergentes (ZAR, MXN, CLP)
+- Classificador de regime HMM de 2 estados pra substituir o ADX
+
+Inclua um diff de acurácia do backtest em qualquer PR de sinal.
 
 ---
 
-## signals
+> ⚠️ **Aviso legal.** Esta ferramenta fornece análise probabilística de sinais de mercado publicamente disponíveis, apenas para fins informativos. Não é aconselhamento financeiro, recomendação de investimento, nem solicitação para comprar ou vender qualquer moeda ou ativo. O desempenho histórico do modelo não garante resultados futuros. Sempre consulte um profissional financeiro licenciado antes de tomar decisões de câmbio. Use por sua conta e risco. Veja [LICENSE](LICENSE).
+
+---
+---
+
+## English
+
+You receive a USD payment. You need BRL. Do you convert today, or wait?
+
+**cambio** fetches live market data, runs 10+ quant signals across macro, technical, and carry dimensions, and gives you a probability-graded answer — calibrated to *your* payment schedule, your spread, and your real-world deadline. It can also sit in the background and ping you in the browser the moment the dollar looks ready to fall.
+
+> **v0.2.0** — background mode (`--watch`), browser alerts (`--notify`), local journal with self-feedback, intraday-aware signals, deadline/spread-aware backtest, three-way decision (NOW / SPLIT / WAIT).
+
+### quick start
+
+```bash
+git clone https://github.com/vitor-araujo/cambio.git && cd cambio
+python3 -m venv .venv && .venv/bin/pip install -q yfinance pandas numpy
+.venv/bin/python fx_timing.py
+```
+
+No API keys. Live data from Yahoo Finance and the [BCB open API](https://dadosabertos.bcb.gov.br/).
+
+### features
+
+- **10+ signals** — momentum, carry, mean-reversion
+- **ADX-conditioned** RSI and Bollinger %B (auto-suppressed in trending markets)
+- **Three-way verdict** — NOW / SPLIT / WAIT, probability-graded language
+- **Intraday-aware** — last bar replaced with the live tick before signals run
+- **Deadline-aware backtest** (`--deadline-days`) — forces execution at your real-world cutoff
+- **Cost-aware backtest** (`--spread-bps`) — BRL figures net of fintech spread
+- **Browser alerts** (`--notify`) — Fraunces/JetBrains-Mono HTML page with one-click link to Higlobe
+- **Background mode** (`--watch`) — leave it running, get pinged on flip-to-NOW
+- **Journal** — every call logged to `.fx_journal.csv`; next run audits the previous one
+- **Walk-forward backtest** (`--backtest`) on your own payment schedule via `--days`
+- **Português** output via `--lang pt`
+
+### signals
 
 | Factor | Signal | Weight | Logic |
 |---|---|---|---|
@@ -366,29 +468,22 @@ Você não precisa repetir toda a configuração. Na próxima vez que quiser con
 | | USD/BRL percentile | 13% | Multi-year high → now |
 | | 30d MA slope | 10% | Rising → wait · falling → now |
 
-RSI and Bollinger %B are weighted down by up to 70% when ADX detects a strong trend — avoiding mean-reversion calls against running momentum.
-
----
-
-## backtest
+### backtest
 
 Walk-forward, no look-ahead. Oracle = rate at the **next scheduled check date** — not a theoretical intraday price you couldn't act on.
 
 | Schedule | NOW accuracy | WAIT accuracy | Calls |
 |---|---|---|---|
-| 2nd & 17th (default) | 58.3 % | 44.4 % | 102 decisions |
-| 5th & 20th | **75.0 %** | 42.2 % | 103 decisions |
+| 2nd & 17th (default) | 58.3 % | 44.4 % | 102 |
+| 5th & 20th | **75.0 %** | 42.2 % | 103 |
 
-**Accuracy varies by schedule.** Run the backtest on your actual payment dates before relying on the model.
+**Accuracy varies by schedule.** Run the backtest on your actual payment dates first.
 
 ```bash
-# test your own schedule
-.venv/bin/python fx_timing.py --backtest --days 5 20
+.venv/bin/python fx_timing.py --backtest --days 5 20 --deadline-days 15 --spread-bps 50
 ```
 
----
-
-## options
+### options
 
 ```
 fx_timing.py [--backtest] [--days DAY ...] [--lang {en,pt}]
@@ -396,8 +491,8 @@ fx_timing.py [--backtest] [--days DAY ...] [--lang {en,pt}]
              [--notify] [--watch] [--watch-interval MIN] [--name NAME]
 
   --backtest             walk-forward backtest since 2022
-  --days 5 20            which day(s) of month you typically decide (default: 2 17)
-  --lang pt              output in Portuguese / saída em português
+  --days 5 20            day(s) of month you typically decide (default: 2 17)
+  --lang pt              output in Portuguese
   --deadline-days 15     forced execution window in days (default: 15)
   --spread-bps 50        effective FX spread in basis points (default: 50 = 0.50 %)
   --notify               open an HTML alert in the browser when p(NOW) is high
@@ -406,19 +501,15 @@ fx_timing.py [--backtest] [--days DAY ...] [--lang {en,pt}]
   --name Vitor           name shown in the browser alert headline
 ```
 
----
-
-## contributing
+### contributing
 
 PRs welcome. High-value directions:
 
 - Brazil 5Y CDS or EMBI+ spread as sovereign risk signal
-- COPOM calendar as a volatility event filter  
+- COPOM calendar as a volatility event filter
 - Cross-sectional EM FX momentum (ZAR, MXN, CLP)
 - HMM 2-state regime classifier to replace ADX
 
 Include a backtest accuracy diff in any signal PR.
-
----
 
 > ⚠️ **Disclaimer.** This tool provides probabilistic analysis of publicly available market signals for informational purposes only. It is not financial advice, investment advice, or a solicitation to buy or sell any currency or asset. Past model performance does not guarantee future results. Always consult a licensed financial professional before making currency exchange decisions. Use at your own risk. See [LICENSE](LICENSE).
