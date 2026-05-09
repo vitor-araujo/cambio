@@ -10,7 +10,7 @@ USD/BRL Exchange Timing Model
 pip install yfinance pandas numpy
 """
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 
 import argparse
 import io
@@ -186,6 +186,13 @@ DEFAULT_USER_NAME = "Vitor"  # used in the HTML alert headline
 WATCH_INTERVAL_MIN = 60  # minutes between checks in --watch mode
 NOTIFY_THRESHOLD = 0.55  # min p_now to trigger browser alert
 NOTIFY_COOLDOWN_HOURS = 6  # don't re-open the alert within this window
+
+# ── Vanguard discipline (DCA + CMH) ───────────────────────────────────────────────────────
+DEFAULT_DCA_FLOOR = 0.25  # minimum fraction to convert every cycle (regret cap)
+DEFAULT_DCA_CEILING = 1.00  # maximum fraction (only fires on high-conviction NOW)
+SIZE_PIVOT_LOW = 0.30  # p_now ≤ this → floor only
+SIZE_PIVOT_HIGH = 0.70  # p_now ≥ this → ceiling
+CMH_SAFETY_MULTIPLIER = 2.0  # edge must clear 2× spread to be "real" (Bogle)
 
 TICKERS = {
     # usdbrl is intentionally omitted — fetched from BCB PTAX instead of Yahoo
@@ -569,18 +576,44 @@ def apply_regime(probs: dict, regime: float) -> dict:
     }
 
 
-def decide(probs: dict) -> str:
+def size(
+    probs: dict,
+    floor: float = DEFAULT_DCA_FLOOR,
+    ceiling: float = DEFAULT_DCA_CEILING,
+) -> float:
     """
-    Three-way decision:
-      NOW   — p_now is the dominant probability AND clears 0.51 conviction floor.
-      SPLIT — signals materially disagree (p_split is the largest mass) OR
-              the call is a coin-flip between NOW and WAIT (|p_now - p_wait| < 0.06).
-      WAIT  — conservative default.
+    Vanguard-DCA sizing: never zero, never blindly all-in.
+
+    Maps p_now linearly into [floor, ceiling] across the SIZE_PIVOT_LOW …
+    SIZE_PIVOT_HIGH band. Outside the band the result is clipped, so even a
+    strong WAIT still converts at the floor and a strong NOW caps at the
+    ceiling. This minimises worst-case regret variance — the actual
+    objective when your life depends on the outcome.
     """
-    pn, ps, pw = probs["exchange_now"], probs["split"], probs["wait"]
-    if pn > 0.51 and pn >= pw and pn >= ps:
+    pn = float(probs["exchange_now"])
+    span = SIZE_PIVOT_HIGH - SIZE_PIVOT_LOW
+    if span <= 0:
+        return float(np.clip(floor, 0.0, 1.0))
+    norm = (pn - SIZE_PIVOT_LOW) / span
+    norm = max(0.0, min(1.0, norm))
+    return float(np.clip(floor + (ceiling - floor) * norm, 0.0, 1.0))
+
+
+def decide(
+    probs: dict,
+    floor: float = DEFAULT_DCA_FLOOR,
+    ceiling: float = DEFAULT_DCA_CEILING,
+) -> str:
+    """
+    Categorical label derived from the sizing fraction:
+      NOW   — size ≥ 0.70 (high conviction → convert most/all)
+      SPLIT — 0.40 ≤ size < 0.70 (mixed signals, partial)
+      WAIT  — size < 0.40 (floor-only, mandatory DCA)
+    """
+    s = size(probs, floor, ceiling)
+    if s >= 0.70:
         return "exchange_now"
-    if ps >= max(pn, pw) or abs(pn - pw) < 0.06:
+    if s >= 0.40:
         return "split"
     return "wait"
 
@@ -857,7 +890,7 @@ def oracle(usdbrl: pd.Series, d: date, dates: list[date]) -> str:
     return "split"
 
 
-# ── Backtest Core ─────────────────────────────────────────────────────────────
+# ── Backtest Core ──────────────────────────────────────────────────────────────────────
 @dataclass
 class Row:
     date: date
@@ -870,12 +903,15 @@ class Row:
     composite: float
     agreement: float
     regime: float
+    size_frac: float = DEFAULT_DCA_FLOOR
 
 
 def run_backtest(
     all_data: dict[str, pd.Series],
     carry_diff: Optional[pd.Series],
     check_days: tuple[int, ...] = (2, 17),
+    dca_floor: float = DEFAULT_DCA_FLOOR,
+    dca_ceiling: float = DEFAULT_DCA_CEILING,
 ) -> list[Row]:
     usdbrl = all_data["usdbrl"]
     dates = decision_dates(check_days=check_days)
@@ -907,7 +943,8 @@ def run_backtest(
 
         probs = probabilities(sigs)
         probs = apply_regime(probs, regime)
-        dec = decide(probs)
+        dec = decide(probs, dca_floor, dca_ceiling)
+        size_frac = size(probs, dca_floor, dca_ceiling)
         orc = oracle(usdbrl, d, dates)
         rate = nearest_rate(usdbrl, d)
 
@@ -926,20 +963,21 @@ def run_backtest(
                 composite=probs["composite"],
                 agreement=probs["agreement"],
                 regime=regime,
+                size_frac=size_frac,
             )
         )
 
     return rows
 
 
-# ── Sequential Simulation ─────────────────────────────────────────────────────
+# ── Sequential Simulation ────────────────────────────────────────────────────────────
 @dataclass
 class Scenario:
     start_date: date
-    execute_date: date
+    execute_date: date  # date of the LAST partial conversion
     start_rate: float
-    execute_rate: float
-    periods_waited: int
+    effective_rate: float  # USD-weighted average rate the model achieved
+    periods_used: int  # number of partial conversions executed
     brl_model: float
     brl_immediate: float
 
@@ -962,12 +1000,13 @@ def sequential_sim(
     spread_bps: int = DEFAULT_SPREAD_BPS,
 ) -> list[Scenario]:
     """
-    From each first check-day of the month, follow model decisions until NOW/SPLIT
-    fires or the deadline elapses, then compare BRL received vs immediate exchange.
+    Vanguard-DCA simulation. From each scenario start, walk the schedule and
+    convert `size_frac` of the **remaining** USD at every check date. Whatever
+    is left at the deadline is force-converted.
 
-    Spread is applied symmetrically (same number of conversions on both legs),
-    so it does not move the wins/losses comparison — but the absolute BRL value
-    reported reflects what actually lands in the user's account.
+    Compares the resulting effective BRL against the lump-sum baseline
+    (convert 100 % at start). Both legs pay the same per-USD spread, so the
+    win/loss is purely the timing edge net of conversion friction.
     """
     max_wait = _max_wait_periods(check_days, deadline_days)
     fee = 1.0 - spread_bps / 10_000.0
@@ -983,30 +1022,43 @@ def sequential_sim(
             continue
 
         start_r = row_map[start_d].rate
-        execute_d = pool[-1]  # forced exchange at deadline
-        execute_r = row_map[execute_d].rate if execute_d in row_map else None
-        periods = len(pool) - 1
+        remaining = float(AMOUNT)
+        brl_received = 0.0
+        usd_converted = 0.0
+        last_exec_d = pool[0]
+        periods_used = 0
 
         for i, d in enumerate(pool):
-            if d not in row_map:
+            r = row_map.get(d)
+            if r is None:
                 continue
-            if row_map[d].model in ("exchange_now", "split"):
-                execute_d = d
-                execute_r = row_map[d].rate
-                periods = i
+            is_last = i == len(pool) - 1
+            frac = 1.0 if is_last else r.size_frac
+            chunk = remaining * frac
+            if chunk <= 1e-6:
+                continue
+            brl_received += chunk * r.rate * fee
+            usd_converted += chunk
+            remaining -= chunk
+            last_exec_d = d
+            periods_used += 1
+            if remaining <= 1e-6:
                 break
 
-        if execute_r is None:
+        if usd_converted <= 0:
             continue
+
+        # USD-weighted effective rate (pre-fee, for comparability with start_rate)
+        effective_rate = brl_received / (usd_converted * fee)
 
         scenarios.append(
             Scenario(
                 start_date=start_d,
-                execute_date=execute_d,
+                execute_date=last_exec_d,
                 start_rate=start_r,
-                execute_rate=execute_r,
-                periods_waited=periods,
-                brl_model=AMOUNT * execute_r * fee,
+                effective_rate=effective_rate,
+                periods_used=periods_used,
+                brl_model=brl_received,
                 brl_immediate=AMOUNT * start_r * fee,
             )
         )
@@ -1045,7 +1097,7 @@ def render_backtest(
 
     print()
     print(
-        f"  {'Date':<12} {'Model':<7} {'Oracle':<7} "
+        f"  {'Date':<12} {'Model':<7} {'Sz':>4} {'Oracle':<7} "
         f"{'Rate':>7} {'14d':>7} {'30d':>7} "
         f"{'Δ14d':>6}  {'Δ30d':>6}  {'Rgm':>5}  OK"
     )
@@ -1057,9 +1109,10 @@ def render_backtest(
         p14 = f"{(r.rate_14d / r.rate - 1) * 100:+.1f}%" if r.rate_14d else "  n/a"
         p30 = f"{(r.rate_30d / r.rate - 1) * 100:+.1f}%" if r.rate_30d else "  n/a"
         rgm = f"{r.regime:+.2f}"
+        sz = f"{r.size_frac:.0%}"
         ok = "✓" if r.correct else "✗"
         print(
-            f"  {str(r.date):<12} {lbl[r.model]:<7} {lbl[r.oracle]:<7}"
+            f"  {str(r.date):<12} {lbl[r.model]:<7} {sz:>4} {lbl[r.oracle]:<7}"
             f" {r.rate:>7.3f} {d14:>7} {d30:>7}"
             f" {p14:>6}  {p30:>6}  {rgm:>5}  {ok}"
         )
@@ -1120,8 +1173,8 @@ def render_backtest(
     )
     print()
     print(
-        f"  {'Start':<12} {'Execute':<12} {'R@Start':>8} {'R@Exec':>8}"
-        f" {'Wait':>5}  {'ΔBRL':>10}  {'Δ%':>7}  Result"
+        f"  {'Start':<12} {'Last Exec':<12} {'R@Start':>8} {'R@Eff':>8}"
+        f" {'Cuts':>5}  {'ΔBRL':>10}  {'Δ%':>7}  Result"
     )
     print("  " + "─" * (W - 2))
 
@@ -1132,8 +1185,8 @@ def render_backtest(
         flag = "▲ win" if g > 50 else "▼ loss" if g < -50 else "  tie"
         print(
             f"  {str(s.start_date):<12} {str(s.execute_date):<12}"
-            f" {s.start_rate:>8.4f} {s.execute_rate:>8.4f}"
-            f" {str(s.periods_waited) + '×':>5}"
+            f" {s.start_rate:>8.4f} {s.effective_rate:>8.4f}"
+            f" {str(s.periods_used) + '×':>5}"
             f"  {sign}{g:>8.0f}  {sign}{pct:>5.2f}%  {flag}"
         )
 
@@ -1141,10 +1194,38 @@ def render_backtest(
     print(
         f"  Scenarios: {len(scenarios)}   Wins: {wins}   Losses: {losses}   Ties: {len(scenarios) - wins - losses}"
     )
+    avg_gain_pct = float(np.mean(pcts))
     print(f"  Avg BRL gain / scenario   R$ {np.mean(gains):>+8.0f}")
-    print(f"  Avg return vs immediate       {np.mean(pcts):>+6.2f}%")
+    print(f"  Avg return vs immediate       {avg_gain_pct:>+6.2f}%")
     print(f"  Cumulative BRL edge       R$ {sum(gains):>+8.0f}")
     print(f"  Win rate                      {wins / len(scenarios) * 100:>5.1f}%")
+
+    # ── Cost-Matters Hypothesis (Bogle/Vanguard) edge validation ─────────────────────────
+    spread_pct = spread_bps / 100.0
+    safety_threshold = CMH_SAFETY_MULTIPLIER * spread_pct
+    safety_margin = avg_gain_pct - safety_threshold
+    real_edge = safety_margin > 0
+    verdict = "REAL" if real_edge else "INSIDE THE SPREAD"
+    badge = "✓" if real_edge else "⚠"
+
+    print()
+    print("  " + "─" * (W - 2))
+    print(
+        f"  COST-MATTERS HYPOTHESIS  ·  margin-of-safety vs {CMH_SAFETY_MULTIPLIER:g}× spread"
+    )
+    print("  " + "─" * (W - 2))
+    print(f"  Avg model edge                  {avg_gain_pct:>+6.2f} %")
+    print(
+        f"  Cost threshold ({CMH_SAFETY_MULTIPLIER:g}× spread)        {safety_threshold:>6.2f} %"
+    )
+    print(
+        f"  Margin of safety              {safety_margin:>+8.2f} %  {badge} edge is {verdict}"
+    )
+    if not real_edge:
+        print(
+            "  \u26a0  the alleged timing edge sits inside conversion friction \u2014 "
+            "treat the model as decoration, not signal."
+        )
     print()
     print("═" * W)
     print()
@@ -1160,6 +1241,7 @@ def _print_fetch_status(data: dict[str, pd.Series]) -> None:
 def _build_journal_entry(
     probs: dict,
     decision: str,
+    size_frac: float,
     rate_signal: float,
     rate_live: Optional[float],
     notified: bool,
@@ -1176,6 +1258,7 @@ def _build_journal_entry(
         agreement=probs["agreement"],
         regime=probs.get("regime", 0.0),
         notified=notified,
+        size=size_frac,
     )
 
 
@@ -1183,6 +1266,8 @@ def _maybe_notify(
     sigs: list[Signal],
     probs: dict,
     decision: str,
+    size_frac: float,
+    deadline_remaining: Optional[int],
     live_fx: Optional[tuple[float, str]],
     user_name: str,
 ) -> bool:
@@ -1211,6 +1296,8 @@ def _maybe_notify(
         agreement=probs["agreement"],
         regime=probs.get("regime", 0.0),
         top_signals=top_signals,
+        convert_pct=size_frac,
+        deadline_remaining=deadline_remaining,
     )
 
 
@@ -1255,35 +1342,58 @@ def _run_live_cycle(
 
     probs = probabilities(sigs)
     probs = apply_regime(probs, regime)
-    decision = decide(probs)
+    floor = getattr(args, "dca_floor", DEFAULT_DCA_FLOOR)
+    ceiling = getattr(args, "dca_ceiling", DEFAULT_DCA_CEILING)
+    decision = decide(probs, floor, ceiling)
+    size_frac = size(probs, floor, ceiling)
 
     rate_signal = float(data_live["usdbrl"].iloc[-1])
     rate_live = float(live_fx[0]) if live_fx else None
+
+    deadline_days = getattr(args, "deadline_days", DEFAULT_DEADLINE_DAYS)
+    deadline_remaining = journal.days_until_deadline(deadline_days)
 
     if render:
         prev = journal.last_entry()
         summary = journal.render_summary(prev, rate_live or rate_signal)
         if summary:
             print(f"\n  {summary}")
+        if deadline_remaining is not None:
+            usd_chunk = AMOUNT * size_frac
+            print(
+                f"  prazo: {deadline_remaining} dias até execução forçada  ·  "
+                f"sugestão agora: converter {size_frac:.0%} (≈ ${usd_chunk:,.0f})"
+            )
+        else:
+            print(
+                f"  sugestão agora: converter {size_frac:.0%}  ·  "
+                "use --mark-executed após o câmbio para ativar o cronômetro de prazo"
+            )
         render_live(sigs, probs, live_fx=live_fx)
 
     notified = False
     if args.notify:
-        notified = _maybe_notify(sigs, probs, decision, live_fx, args.name)
+        notified = _maybe_notify(
+            sigs, probs, decision, size_frac, deadline_remaining, live_fx, args.name
+        )
         if notified and render:
             print("  ◈  alerta aberto no navegador — abre Higlobe e converte agora.\n")
 
     journal.append(
-        _build_journal_entry(probs, decision, rate_signal, rate_live, notified)
+        _build_journal_entry(
+            probs, decision, size_frac, rate_signal, rate_live, notified
+        )
     )
 
     return {
         "ok": True,
         "cache": cache,
         "decision": decision,
+        "size": size_frac,
         "probs": probs,
         "rate_live": rate_live,
         "notified": notified,
+        "deadline_remaining": deadline_remaining,
     }
 
 
@@ -1308,8 +1418,14 @@ def _watch_loop(args) -> None:
                 d = res["decision"]
                 pn = res["probs"]["exchange_now"]
                 rate = res["rate_live"] or 0.0
+                sz = res["size"]
+                rem = res["deadline_remaining"]
+                rem_str = f"{rem}d" if rem is not None else "—"
                 tag = "◈ ALERT" if res["notified"] else "·"
-                print(f"  [{ts}] {d:<13} p_now={pn:.2f}  R$ {rate:.4f}  {tag}")
+                print(
+                    f"  [{ts}] {d:<13} p_now={pn:.2f}  size={sz:.0%}  "
+                    f"R$ {rate:.4f}  prazo={rem_str}  {tag}"
+                )
             time.sleep(interval)
         except KeyboardInterrupt:
             print("\n  watch interrompido.\n")
@@ -1390,6 +1506,35 @@ def main() -> None:
         default=DEFAULT_USER_NAME,
         help=f"Name shown in the browser alert (default: {DEFAULT_USER_NAME}).",
     )
+    parser.add_argument(
+        "--dca-floor",
+        type=float,
+        default=DEFAULT_DCA_FLOOR,
+        metavar="FRAC",
+        help=f"Minimum fraction to convert each cycle (default: {DEFAULT_DCA_FLOOR:.2f}). "
+        "Vanguard-DCA discipline — caps worst-case regret variance.",
+    )
+    parser.add_argument(
+        "--dca-ceiling",
+        type=float,
+        default=DEFAULT_DCA_CEILING,
+        metavar="FRAC",
+        help=f"Maximum fraction to convert when conviction is high (default: {DEFAULT_DCA_CEILING:.2f}).",
+    )
+    parser.add_argument(
+        "--mark-executed",
+        action="store_true",
+        help="Mark the most recent journal entry as executed (anchors the deadline countdown).",
+    )
+    parser.add_argument(
+        "--audit",
+        type=int,
+        nargs="?",
+        const=30,
+        default=None,
+        metavar="DAYS",
+        help="Print behavior-gap audit for the last N days (default: 30) and exit.",
+    )
     args = parser.parse_args()
 
     global _LANG
@@ -1400,6 +1545,49 @@ def main() -> None:
         if not 1 <= d <= 28:
             parser.error(f"--days: {d} is out of range. Use values between 1 and 28.")
     check_days = tuple(sorted(set(args.days)))
+
+    # Validate DCA bounds
+    if not 0.0 <= args.dca_floor <= args.dca_ceiling <= 1.0:
+        parser.error(
+            "--dca-floor and --dca-ceiling must satisfy 0 ≤ floor ≤ ceiling ≤ 1."
+        )
+
+    # ── Standalone subcommands ──────────────────────────────────────────────────────
+    if args.mark_executed:
+        entry = journal.mark_executed()
+        if entry is None:
+            print("\n  ⚠  diário vazio — rode uma análise antes de marcar execução.\n")
+            return
+        print(
+            f"\n  ✓  marcado como executado: {entry.ts.strftime('%d/%m/%Y %H:%M')}  "
+            f"· {entry.decision.upper()} @ R$ {entry.rate_signal:.4f} · size {entry.size:.0%}\n"
+        )
+        return
+
+    if args.audit is not None:
+        a = journal.audit_summary(days=args.audit)
+        print()
+        print(f"  AUDITORIA · últimos {a['window_days']} dias")
+        print("  " + "─" * 60)
+        print(f"  Execuções do script   {a['total_runs']:>4}")
+        print(f"  Alertas disparados   {a['alerts']:>4}")
+        print(f"  Câmbios marcados     {a['executed']:>4}")
+        print(f"  Alertas ignorados    {a['missed_alerts']:>4}")
+        if a["alerts"]:
+            print(
+                f"  Taxa de override    {a['override_rate']:>5.0%}  "
+                "← quanto você ignorou o próprio modelo"
+            )
+        if a["missed_entries"]:
+            print()
+            print("  Alertas não executados:")
+            for e in a["missed_entries"][-10:]:
+                print(
+                    f"    {e.ts.strftime('%d/%m %H:%M')}  "
+                    f"NOW p={e.p_now:.2f} @ R$ {e.rate_signal:.4f}"
+                )
+        print()
+        return
 
     if args.backtest:
         warmup = (
@@ -1436,7 +1624,13 @@ def main() -> None:
         else:
             print("  ⚠  COT signal disabled (CFTC unavailable)")
 
-        rows = run_backtest(all_data, carry_diff, check_days)
+        rows = run_backtest(
+            all_data,
+            carry_diff,
+            check_days,
+            dca_floor=args.dca_floor,
+            dca_ceiling=args.dca_ceiling,
+        )
         scenarios = sequential_sim(
             rows, check_days, args.deadline_days, args.spread_bps
         )

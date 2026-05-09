@@ -153,6 +153,28 @@ h1 strong {{ font-weight: 700; font-style: italic; color: var(--amber); }}
   animation: slide .6s .65s ease-out backwards;
 }}
 .stat-line strong {{ color: var(--ink); font-weight: 700; font-variant-numeric: tabular-nums; }}
+.size-card {{
+  margin-bottom: 2rem; padding: 1.4rem 1.6rem;
+  border: 1px solid var(--line); border-radius: 4px;
+  background: linear-gradient(135deg, rgba(74,222,128,.06), rgba(251,191,36,.04));
+  animation: slide .6s .6s ease-out backwards;
+}}
+.size-label {{
+  font-size: .68rem; letter-spacing: .2em; color: var(--green);
+  text-transform: uppercase; margin-bottom: .5rem;
+}}
+.size-value {{
+  font-family: 'Fraunces', serif; font-weight: 700; font-style: italic;
+  font-size: clamp(1.8rem, 4vw, 2.4rem); color: var(--amber);
+  letter-spacing: -.01em; line-height: 1;
+}}
+.size-of {{
+  font-family: 'JetBrains Mono', monospace; font-style: normal;
+  font-weight: 400; font-size: .85rem; color: var(--muted); letter-spacing: 0;
+}}
+.size-detail {{
+  margin-top: .7rem; font-size: .78rem; color: var(--muted); letter-spacing: .02em;
+}}
 .cta {{
   display: inline-flex; align-items: center; gap: .9rem;
   background: var(--amber); color: #0a1612;
@@ -188,6 +210,12 @@ h1 strong {{ font-weight: 700; font-style: italic; color: var(--amber); }}
   </div>
 
   <div class="signals">{signal_rows}</div>
+
+  <div class="size-card">
+    <div class="size-label">Sugestão de tamanho</div>
+    <div class="size-value">{convert_pct} <span class="size-of">de {amount} USD</span></div>
+    <div class="size-detail">{deadline_text}</div>
+  </div>
 
   <div class="stat-line">
     <span>p(agora) <strong>{p_now}</strong></span>
@@ -230,10 +258,22 @@ def render_alert(
     regime: float,
     top_signals: list[tuple[str, float]],
     subtext: str,
+    convert_pct: float = 1.0,
+    deadline_remaining: Optional[int] = None,
+    amount_usd: int = 10_000,
     output_path: str = ALERT_PATH,
 ) -> str:
     """Write the alert HTML to disk and return its absolute path."""
     rows = "\n    ".join(_signal_row(n, s) for n, s in top_signals)
+    if deadline_remaining is None:
+        deadline_text = "sem prazo ativo — marca o câmbio com --mark-executed"
+    elif deadline_remaining <= 0:
+        deadline_text = "prazo encerrado — câmbio forçado hoje"
+    elif deadline_remaining <= 3:
+        deadline_text = f"⚠ apenas {deadline_remaining} dia(s) até execução forçada"
+    else:
+        deadline_text = f"{deadline_remaining} dias até execução forçada"
+
     html_out = _TEMPLATE.format(
         name=html.escape(name),
         ts=datetime.now().strftime("%d/%m/%Y · %H:%M"),
@@ -245,6 +285,9 @@ def render_alert(
         regime=f"{regime:+.2f}",
         subtext=html.escape(subtext),
         higlobe_url=HIGLOBE_URL,
+        convert_pct=f"{convert_pct:.0%}",
+        amount=f"{amount_usd:,}",
+        deadline_text=html.escape(deadline_text),
     )
     with open(output_path, "w", encoding="utf-8") as f:
         f.write(html_out)
@@ -267,6 +310,9 @@ def alert(
     regime: float,
     top_signals: list[tuple[str, float]],
     subtext: Optional[str] = None,
+    convert_pct: float = 1.0,
+    deadline_remaining: Optional[int] = None,
+    amount_usd: int = 10_000,
     output_path: str = ALERT_PATH,
 ) -> bool:
     """One-shot: render + open. Returns True on success."""
@@ -283,6 +329,9 @@ def alert(
         regime=regime,
         top_signals=top_signals,
         subtext=sub,
+        convert_pct=convert_pct,
+        deadline_remaining=deadline_remaining,
+        amount_usd=amount_usd,
         output_path=output_path,
     )
     return open_in_browser(path)

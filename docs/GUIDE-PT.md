@@ -137,7 +137,7 @@ A forma mais prática no dia-a-dia. Deixa rodando, ele te avisa.
 
 ## Passo 8
 
-### Diário
+### Diário + auditoria de comportamento
 
 Toda execução adiciona uma linha em `.fx_journal.csv`. Na rodada seguinte, aparece no topo:
 
@@ -145,9 +145,21 @@ Toda execução adiciona uma linha em `.fx_journal.csv`. Na rodada seguinte, apa
 último sinal há 6h: WAIT @ R$ 5.0810  →  agora R$ 5.1340  (+1.04%) ✓
 ```
 
-Feedback constante sem precisar abrir planilha. O CSV abre direto no Excel ou Numbers se quiser ver o histórico completo.
+Depois que você fecha um câmbio na corretora, marca a entrada para o cronômetro de prazo funcionar:
 
-O arquivo não vai pro Git — é só seu.
+```bash
+.venv/bin/python fx_timing.py --mark-executed
+```
+
+Quer ver quantos alertas você ignorou? (a *behavior gap* que destrói mais valor que más previsões — Morningstar, *Mind the Gap*)
+
+```bash
+.venv/bin/python fx_timing.py --audit 30
+```
+
+Mostra: alertas disparados, câmbios marcados, alertas ignorados, taxa de override.
+
+O CSV abre direto no Excel ou Numbers se quiser ver o histórico completo. O arquivo não vai pro Git — é só seu.
 
 ---
 
@@ -165,14 +177,17 @@ Mostra como o modelo teria performado nos *seus* dias específicos de decisão. 
 .venv/bin/python fx_timing.py --lang pt --backtest --days 10 25
 ```
 
-**Dois ajustes essenciais para realismo:**
+**Três ajustes essenciais para realismo:**
 
 * `--deadline-days 15` — força o câmbio depois de N dias mesmo se o sinal disser pra aguardar.
 * `--spread-bps 50` — desconta o spread da corretora (Wise, Higlobe, etc). 50 = 0,50 %.
+* `--dca-floor 0.25 --dca-ceiling 1.00` — disciplina Vanguard-DCA. Cada checkpoint converte uma fração entre 25 % e 100 % do que ainda falta, baseada na convicção do modelo. Nunca zero, nunca tudo no escuro.
 
 ```bash
 .venv/bin/python fx_timing.py --lang pt --backtest --days 5 20 --deadline-days 15 --spread-bps 50
 ```
+
+No final do backtest, repare na seção **COST-MATTERS HYPOTHESIS** — ela compara a vantagem do modelo com 2× o spread. Se a margem for negativa, o relatório diz `INSIDE THE SPREAD`: a vantagem do modelo é menor que o custo da corretora, então estatisticamente é ruído. Princípio Bogle/Vanguard: sem margem de segurança, não é vantagem real.
 
 ---
 

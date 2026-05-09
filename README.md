@@ -4,7 +4,7 @@
   <p align="center">
     <a href="https://github.com/vitor-araujo/cambio/blob/main/LICENSE"><img alt="MIT" src="https://img.shields.io/badge/license-MIT-22c55e?style=flat-square"></a>
     <img alt="Python 3.10+" src="https://img.shields.io/badge/python-3.10+-4B8BBE?style=flat-square&logo=python&logoColor=white">
-    <img alt="versão 0.2.0" src="https://img.shields.io/badge/version-0.2.0-fbbf24?style=flat-square">
+    <img alt="versão 0.3.0" src="https://img.shields.io/badge/version-0.3.0-fbbf24?style=flat-square">
     <img alt="sem API key" src="https://img.shields.io/badge/dados-grátis%20·%20sem%20API%20key-f59e0b?style=flat-square">
     <img alt="pt · en" src="https://img.shields.io/badge/lang-pt--BR%20·%20en-6366f1?style=flat-square">
   </p>
@@ -12,7 +12,7 @@
 
 ---
 
-**cambio** é um modelo probabilístico que decide se você converte dólar agora ou espera. Roda 12 sinais quantitativos sobre dados públicos, calibra o resultado pro seu calendário de pagamentos, e te avisa no navegador quando o dólar parecer que vai cair.
+**cambio** é um modelo probabilístico que decide **quanto** você converte de dólar a cada ciclo. Roda 12 sinais quantitativos sobre dados públicos, aplica disciplina Vanguard-DCA (nunca zero, nunca 100 % no escuro), e te avisa no navegador quando a convicção estiver alta o suficiente para subir o tamanho da conversão.
 
 Documentação dos sinais: [`signals.py`](signals.py) · Código-fonte: [github.com/vitor-araujo/cambio](https://github.com/vitor-araujo/cambio)
 
@@ -20,14 +20,15 @@ Documentação dos sinais: [`signals.py`](signals.py) · Código-fonte: [github.
 
 ## Recursos
 
-* 🎯 **Decisão em três vias** — AGORA · DIVIDIR · AGUARDAR, com linguagem graduada por convicção.
+* 🎯 **Sizing Vanguard-DCA** — cada ciclo converte uma fração entre `--dca-floor` (25 %) e `--dca-ceiling` (100 %), proporcional à convicção. Nunca zero, nunca tudo no escuro — minimiza variância de arrependimento.
+* ⚖️ **Validador Cost-Matters** — o backtest declara se a vantagem do modelo sobrepassa **2× spread** (margem de segurança Bogle). Caso contrário, sinaliza "INSIDE THE SPREAD".
+* ⏱️ **Cronômetro de prazo** — o `--watch` mostra quantos dias faltam até a execução forçada, ancorado em `--mark-executed`.
+* 📊 **Auditoria de comportamento** — `--audit` mostra quantos alertas você ignorou nos últimos 30 dias (sua *behavior gap*).
 * 📡 **Dados ao vivo** — PTAX comercial (BCB), AwesomeAPI (intraday), Yahoo (DXY/Brent/VIX/etc), CFTC (COT), SELIC. Zero API keys.
 * 🔄 **Ajuste intraday** — a última cotação substitui a barra do dia antes do cálculo dos sinais.
-* 🛎️ **Alerta no navegador** — abre uma página HTML com link direto pra Higlobe quando p(AGORA) ≥ 55 %.
+* 🛎️ **Alerta no navegador** — página HTML com cartão de tamanho de conversão, prazo restante e link direto pra Higlobe.
 * 👁️ **Modo background** — fica rodando, te avisa só quando o sinal vira.
-* 📓 **Diário automático** — toda decisão fica em `.fx_journal.csv`. A próxima execução te mostra se a anterior estava certa.
-* ⏱️ **Backtest com prazo real** — `--deadline-days` força execução depois do seu cutoff.
-* 💰 **Backtest com custo** — `--spread-bps` desconta o spread da corretora dos resultados.
+* 📓 **Diário automático** — toda decisão fica em `.fx_journal.csv` com `size`, `notified` e `executed`.
 * 🇧🇷 **Saída em português** — `--lang pt`.
 
 ---
@@ -94,13 +95,34 @@ python3 -m venv .venv
 
 ### Modo background
 
-Deixe rodando em uma aba do terminal — alerta automático quando o sinal vira:
+Deixe rodando em uma aba do terminal — alerta automático quando a convicção subir:
 
 ```bash
 .venv/bin/python fx_timing.py --lang pt --watch --notify
 ```
 
-Re-roda a cada 60 minutos, registra no diário, abre o alerta no navegador na primeira virada para AGORA com p ≥ 55 %. `Ctrl+C` para parar.
+Cada ciclo imprime tamanho sugerido + dias até prazo:
+
+```
+[14:32] wait          p_now=0.31  size=25%  R$ 5.0810  prazo=11d  ·
+[15:32] exchange_now  p_now=0.62  size=81%  R$ 5.1340  prazo=10d  ◈ ALERT
+```
+
+### Marcar câmbio executado
+
+Depois que você fecha o câmbio na corretora, ancora o cronômetro de prazo:
+
+```bash
+.venv/bin/python fx_timing.py --mark-executed
+```
+
+### Auditoria do comportamento
+
+Quantos alertas você ignorou? (a *behavior gap* que destrói mais valor que más previsões)
+
+```bash
+.venv/bin/python fx_timing.py --audit 30
+```
 
 ### Backtest realista
 
@@ -153,7 +175,9 @@ Oracle = taxa no **próximo dia de checagem agendado** (não preço intraday te�
 ```
 fx_timing.py [--backtest] [--days DIA ...] [--lang {en,pt}]
              [--deadline-days N] [--spread-bps BPS]
+             [--dca-floor FRAC] [--dca-ceiling FRAC]
              [--notify] [--watch] [--watch-interval MIN] [--name NOME]
+             [--mark-executed] [--audit [DAYS]]
 ```
 
 | Flag | Padrão | Descrição |
@@ -163,10 +187,14 @@ fx_timing.py [--backtest] [--days DIA ...] [--lang {en,pt}]
 | `--lang` | `en` | Idioma da saída (`en` ou `pt`) |
 | `--deadline-days` | `15` | Prazo limite em dias para forçar execução |
 | `--spread-bps` | `50` | Spread efetivo da corretora em basis points |
+| `--dca-floor` | `0.25` | Fração mínima a converter a cada ciclo (Vanguard-DCA) |
+| `--dca-ceiling` | `1.00` | Fração máxima quando a convicção é alta |
 | `--notify` | — | Abre alerta HTML no navegador em flip-to-AGORA |
 | `--watch` | — | Modo background — re-roda em loop |
 | `--watch-interval` | `60` | Minutos entre checagens em `--watch` |
 | `--name` | `Vitor` | Nome no cabeçalho do alerta no navegador |
+| `--mark-executed` | — | Marca última entrada do diário como executada (ancora o cronômetro) |
+| `--audit` | `30` | Imprime auditoria de *behavior gap* dos últimos N dias |
 
 ---
 
@@ -178,13 +206,14 @@ Quatro módulos. Cada um com responsabilidade única.
 
 Ponto de entrada. Junta tudo:
 
-* parsing de CLI e dispatch (`main`)
+* parsing de CLI e dispatch (`main`) — inclui `--mark-executed` e `--audit` como subcomandos
 * download dos dados (`fetch`, `fetch_ptax`, `fetch_selic`, `fetch_cot_eur`, `_fetch_live_fx`)
 * aplicação do tick intraday (`_apply_intraday`)
-* probabilidades e regime (`probabilities`, `apply_regime`, `decide`)
-* renderização do terminal (`render_live`, `render_backtest`)
-* loop walk-forward e simulação P&L (`run_backtest`, `sequential_sim`)
-* loop background (`_run_live_cycle`, `_watch_loop`)
+* probabilidades e regime (`probabilities`, `apply_regime`)
+* **sizing Vanguard-DCA** (`size`, `decide`) — fração de conversão ancorada em piso/teto
+* renderização do terminal (`render_live`, `render_backtest`) — inclui seção Cost-Matters Hypothesis
+* simulação de conversões parciais (`run_backtest`, `sequential_sim`) com `size_frac` por checkpoint
+* loop background (`_run_live_cycle`, `_watch_loop`) — mostra cronômetro de prazo a cada ciclo
 * integração com journal e notify
 
 ### `signals.py` — biblioteca de sinais
@@ -204,10 +233,12 @@ Compute puro, sem efeitos colaterais. Funções principais:
 Append-only CSV (`.fx_journal.csv`). Sem dependências além da stdlib.
 
 * `append(entry)` — adiciona linha
-* `last_entry()` — última decisão registrada
-* `last_notified()` — última vez que o alerta foi disparado
-* `render_summary(prev, cur_rate)` — gera a linha "último sinal há Xh: WAIT @ R$ 5.08 → agora R$ 5.13 (+1.04 %) ✓"
+* `last_entry()` / `last_notified()` / `last_executed()` — acessadores de cauda
+* `mark_executed(when=None)` — flipa `executed=True` na entrada (mais recente ou pelo timestamp)
+* `render_summary(prev, cur_rate)` — linha "último sinal há Xh: WAIT @ R$ 5.08 → agora R$ 5.13 (+1.04 %) ✓"
 * `should_notify(decision, p_now)` — aplica threshold + cooldown de 6 h
+* `days_until_deadline(deadline_days)` — dias restantes ancorados na última execução
+* `audit_summary(days)` — alertas vs execuções vs taxa de override (a *behavior gap* de Morningstar)
 
 ### `notify.py` — alerta HTML
 
@@ -273,18 +304,19 @@ Inclua um diff de acurácia do backtest em qualquer PR de sinal.
 
 ## English
 
-**cambio** is a probabilistic model that decides whether to convert USD now or wait. It runs 12 quant signals over public data, calibrates the answer to your payment schedule, and pings you in the browser when the dollar looks ready to fall.
+**cambio** is a probabilistic model that decides **how much** USD to convert each cycle. It runs 12 quant signals over public data, applies Vanguard-DCA discipline (never zero, never blindly all-in), and pings you in the browser when conviction is high enough to scale up the conversion size.
 
 ### Features
 
-* 🎯 **Three-way decision** — NOW · SPLIT · WAIT, probability-graded language.
+* 🎯 **Vanguard-DCA sizing** — every cycle converts a fraction in `[--dca-floor, --dca-ceiling]` proportional to conviction. Never zero, never blindly all-in.
+* ⚖️ **Cost-Matters validator** — the backtest declares whether the model edge clears **2× spread** (Bogle margin of safety). Otherwise it flags "INSIDE THE SPREAD".
+* ⏱️ **Deadline countdown** — `--watch` shows days remaining until forced execution, anchored on `--mark-executed`.
+* 📊 **Behavior-gap audit** (`--audit`) — how many alerts you ignored in the last N days.
 * 📡 **Live data** — BCB PTAX, AwesomeAPI (intraday), Yahoo, CFTC (COT), SELIC. No API keys.
 * 🔄 **Intraday-aware** — last bar replaced with the live tick before signals run.
-* 🛎️ **Browser alerts** (`--notify`) — HTML page with one-click Higlobe link when p(NOW) ≥ 55 %.
-* 👁️ **Background mode** (`--watch`) — leave it running, alert on flip.
-* 📓 **Auto journal** — every call logged to `.fx_journal.csv`; next run audits the previous one.
-* ⏱️ **Deadline-aware backtest** (`--deadline-days`).
-* 💰 **Cost-aware backtest** (`--spread-bps`).
+* 🛎️ **Browser alerts** (`--notify`) — HTML page with size card, deadline countdown and one-click Higlobe link.
+* 👁️ **Background mode** (`--watch`).
+* 📓 **Auto journal** — every call logged to `.fx_journal.csv` with `size`, `notified`, `executed`.
 
 ### Installation
 
@@ -312,7 +344,9 @@ python3 -m venv .venv
 ```
 fx_timing.py [--backtest] [--days DAY ...] [--lang {en,pt}]
              [--deadline-days N] [--spread-bps BPS]
+             [--dca-floor FRAC] [--dca-ceiling FRAC]
              [--notify] [--watch] [--watch-interval MIN] [--name NAME]
+             [--mark-executed] [--audit [DAYS]]
 ```
 
 | Flag | Default | Description |
@@ -322,10 +356,14 @@ fx_timing.py [--backtest] [--days DAY ...] [--lang {en,pt}]
 | `--lang` | `en` | Output language (`en` or `pt`) |
 | `--deadline-days` | `15` | Forced-execution window |
 | `--spread-bps` | `50` | Effective FX spread in basis points |
+| `--dca-floor` | `0.25` | Minimum fraction to convert each cycle (Vanguard-DCA) |
+| `--dca-ceiling` | `1.00` | Maximum fraction when conviction is high |
 | `--notify` | — | Open HTML alert on flip-to-NOW |
 | `--watch` | — | Background mode — re-run on a schedule |
 | `--watch-interval` | `60` | Minutes between checks in `--watch` |
 | `--name` | `Vitor` | Name shown in the browser alert |
+| `--mark-executed` | — | Mark the most recent journal entry as executed |
+| `--audit` | `30` | Print behavior-gap audit for the last N days |
 
 ### Project layout
 
