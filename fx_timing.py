@@ -10,7 +10,7 @@ USD/BRL Exchange Timing Model
 pip install yfinance pandas numpy
 """
 
-__version__ = "0.4.0"
+__version__ = "0.4.1"
 
 import argparse
 import io
@@ -30,7 +30,8 @@ import yfinance as yf
 
 import journal
 import notify
-import whatsapp
+import rate_alert
+from notifiers import DEFAULT_PROVIDER, ENV_VAR, available, get_notifier
 from signals import Signal, build_signals
 
 warnings.filterwarnings("ignore")
@@ -1380,20 +1381,28 @@ def _run_live_cycle(
         if notified and render:
             print("  ◈  alerta aberto no navegador — abre Higlobe e converte agora.\n")
 
-    wa_result: Optional[dict] = None
-    if getattr(args, "whatsapp", False) and rate_live is not None:
-        wa_result = whatsapp.maybe_alert_on_rise(
-            rate_live,
-            threshold_pct=args.whatsapp_threshold,
-            cooldown_min=args.whatsapp_cooldown,
-        )
-        if wa_result["fired"] and render:
-            print(
-                f"  📱  WhatsApp enviado · USD/BRL R$ {rate_live:.4f}  "
-                f"({wa_result['delta_pct']:+.2f}% vs âncora)\n"
+    alert_result: Optional[dict] = None
+    if getattr(args, "phone_alerts", False) and rate_live is not None:
+        try:
+            notifier = get_notifier(args.alert_provider)
+        except ValueError as e:
+            if render:
+                print(f"  ⚠  provedor inválido: {e}")
+            notifier = None
+        if notifier is not None:
+            alert_result = rate_alert.maybe_alert_on_rise(
+                rate_live,
+                notifier=notifier,
+                threshold_pct=args.alert_threshold,
+                cooldown_min=args.alert_cooldown,
             )
-        elif wa_result.get("error") and render:
-            print(f"  ⚠  WhatsApp falhou: {wa_result['error']}")
+            if alert_result["fired"] and render:
+                print(
+                    f"  📱  alerta enviado via {alert_result['provider']} · "
+                    f"R$ {rate_live:.4f} ({alert_result['delta_pct']:+.2f}% vs âncora)\n"
+                )
+            elif alert_result.get("error") and render:
+                print(f"  ⚠  alerta falhou: {alert_result['error']}")
 
     journal.append(
         _build_journal_entry(
@@ -1410,7 +1419,7 @@ def _run_live_cycle(
         "rate_live": rate_live,
         "notified": notified,
         "deadline_remaining": deadline_remaining,
-        "whatsapp": wa_result,
+        "alert": alert_result,
     }
 
 
@@ -1421,16 +1430,21 @@ def _watch_loop(args) -> None:
         f"\n  ◉  watch mode · a cada {args.watch_interval} min · "
         f"alerta abre Higlobe quando p(agora) ≥ {NOTIFY_THRESHOLD:.0%}"
     )
-    if getattr(args, "whatsapp", False):
-        if whatsapp.is_configured():
-            print(
-                f"  📱  WhatsApp ON · dispara em +{args.whatsapp_threshold:.2f}% · "
-                f"cooldown {args.whatsapp_cooldown} min"
-            )
-        else:
-            print(
-                "  ⚠  --whatsapp pedido mas falta config. Rode `python configure.py`."
-            )
+    if getattr(args, "phone_alerts", False):
+        try:
+            notifier = get_notifier(args.alert_provider)
+            if notifier.is_configured():
+                print(
+                    f"  📱  {notifier.name} ON · dispara em +{args.alert_threshold:.2f}% · "
+                    f"cooldown {args.alert_cooldown} min"
+                )
+            else:
+                print(
+                    f"  ⚠  --phone-alerts ({notifier.name}) faltam vars: "
+                    f"{', '.join(notifier.missing_keys())}. Rode `python configure.py`."
+                )
+        except ValueError as e:
+            print(f"  ⚠  provedor inválido: {e}")
     print("  Ctrl+C para parar.\n")
     cache: Optional[dict] = None
     cycle = 0
@@ -1451,9 +1465,9 @@ def _watch_loop(args) -> None:
                 tags = []
                 if res["notified"]:
                     tags.append("◈ ALERT")
-                wa = res.get("whatsapp")
-                if wa and wa.get("fired"):
-                    tags.append(f"📱 WA {wa['delta_pct']:+.2f}%")
+                a = res.get("alert")
+                if a and a.get("fired"):
+                    tags.append(f"📱 {a['provider']} {a['delta_pct']:+.2f}%")
                 tag = "  ".join(tags) if tags else "·"
                 print(
                     f"  [{ts}] {d:<13} p_now={pn:.2f}  size={sz:.0%}  "
@@ -1534,25 +1548,32 @@ def main() -> None:
         help=f"Minutes between checks in --watch mode (default: {WATCH_INTERVAL_MIN}).",
     )
     parser.add_argument(
-        "--whatsapp",
+        "--phone-alerts",
         action="store_true",
-        help="Send WhatsApp alerts when USD/BRL rises past --whatsapp-threshold. "
+        help="Send phone alerts when USD/BRL rises past --alert-threshold. "
         "Run `python configure.py` first.",
     )
     parser.add_argument(
-        "--whatsapp-threshold",
+        "--alert-provider",
+        choices=available(),
+        default=None,
+        help="Messaging backend (default: NOTIFIER_PROVIDER from .env, "
+        f"else '{DEFAULT_PROVIDER}').",
+    )
+    parser.add_argument(
+        "--alert-threshold",
         type=float,
         default=None,
         metavar="PCT",
-        help="%% rise vs anchor that triggers a WhatsApp alert (default: 1.0, "
+        help="%% rise vs anchor that triggers an alert (default: 1.0, "
         "or FX_ALERT_THRESHOLD_PCT from .env).",
     )
     parser.add_argument(
-        "--whatsapp-cooldown",
+        "--alert-cooldown",
         type=int,
         default=None,
         metavar="MIN",
-        help="Minutes between consecutive WhatsApp alerts (default: 60, "
+        help="Minutes between consecutive alerts (default: 60, "
         "or FX_ALERT_COOLDOWN_MIN from .env).",
     )
     parser.add_argument(
@@ -1595,16 +1616,18 @@ def main() -> None:
     global _LANG
     _LANG = args.lang
 
-    # Load .env (silently no-op if absent) before reading WhatsApp config
-    whatsapp.load_env()
-    if args.whatsapp_threshold is None:
-        args.whatsapp_threshold = float(
-            os.getenv("FX_ALERT_THRESHOLD_PCT", whatsapp.DEFAULT_THRESHOLD_PCT)
+    # Load .env (silently no-op if absent) before reading alert config
+    rate_alert.load_env()
+    if args.alert_threshold is None:
+        args.alert_threshold = float(
+            os.getenv("FX_ALERT_THRESHOLD_PCT", rate_alert.DEFAULT_THRESHOLD_PCT)
         )
-    if args.whatsapp_cooldown is None:
-        args.whatsapp_cooldown = int(
-            os.getenv("FX_ALERT_COOLDOWN_MIN", whatsapp.DEFAULT_COOLDOWN_MIN)
+    if args.alert_cooldown is None:
+        args.alert_cooldown = int(
+            os.getenv("FX_ALERT_COOLDOWN_MIN", rate_alert.DEFAULT_COOLDOWN_MIN)
         )
+    if args.alert_provider is None:
+        args.alert_provider = os.getenv(ENV_VAR, DEFAULT_PROVIDER)
 
     # Validate day numbers
     for d in args.days:

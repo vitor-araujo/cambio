@@ -40,4 +40,4 @@ Thumbs.db
 # Local journal & alert artifacts
 .fx_journal.csv
 .fx_alert.html
-.fx_whatsapp.state
+.fx_alert.state
