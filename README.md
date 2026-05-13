@@ -4,7 +4,7 @@
   <p align="center">
     <a href="https://github.com/vitor-araujo/cambio/blob/main/LICENSE"><img alt="MIT" src="https://img.shields.io/badge/license-MIT-22c55e?style=flat-square"></a>
     <img alt="Python 3.10+" src="https://img.shields.io/badge/python-3.10+-4B8BBE?style=flat-square&logo=python&logoColor=white">
-    <img alt="versão 0.4.3" src="https://img.shields.io/badge/version-0.4.3-fbbf24?style=flat-square">
+    <img alt="versão 0.4.4" src="https://img.shields.io/badge/version-0.4.4-fbbf24?style=flat-square">
     <img alt="sem API key" src="https://img.shields.io/badge/dados-grátis%20·%20sem%20API%20key-f59e0b?style=flat-square">
     <img alt="pt · en" src="https://img.shields.io/badge/lang-pt--BR%20·%20en-6366f1?style=flat-square">
   </p>
@@ -354,7 +354,7 @@ Na próxima execução, aparece no topo:
 último sinal há 6h: WAIT @ R$ 5.0810  →  agora R$ 5.1340  (+1.04 %) ✓
 ```
 
-Quando `--notify` está ativo e `p_now ≥ 0.55`, abre `.fx_alert.html` no navegador. Cooldown de 6 horas evita spam. Os dois arquivos ficam locais — não vão pro Git.
+Quando `--notify` está ativo e `p_now ≥ 0.40` (calibrado a partir de 2 meses de uso), abre `.fx_alert.html` no navegador. Cooldown de 6 horas evita spam. Os dois arquivos ficam locais — não vão pro Git.
 
 ---
 

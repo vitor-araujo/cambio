@@ -193,7 +193,7 @@ def render_summary(prev: Optional[Entry], cur_rate: float) -> Optional[str]:
 def should_notify(
     decision: str,
     p_now: float,
-    threshold: float = 0.55,
+    threshold: float = 0.40,
     cooldown_hours: int = 6,
     path: str = JOURNAL_PATH,
 ) -> bool:
