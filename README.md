@@ -4,7 +4,7 @@
   <p align="center">
     <a href="https://github.com/vitor-araujo/cambio/blob/main/LICENSE"><img alt="MIT" src="https://img.shields.io/badge/license-MIT-22c55e?style=flat-square"></a>
     <img alt="Python 3.10+" src="https://img.shields.io/badge/python-3.10+-4B8BBE?style=flat-square&logo=python&logoColor=white">
-    <img alt="versão 0.3.0" src="https://img.shields.io/badge/version-0.3.0-fbbf24?style=flat-square">
+    <img alt="versão 0.4.0" src="https://img.shields.io/badge/version-0.4.0-fbbf24?style=flat-square">
     <img alt="sem API key" src="https://img.shields.io/badge/dados-grátis%20·%20sem%20API%20key-f59e0b?style=flat-square">
     <img alt="pt · en" src="https://img.shields.io/badge/lang-pt--BR%20·%20en-6366f1?style=flat-square">
   </p>
@@ -27,6 +27,7 @@ Documentação dos sinais: [`signals.py`](signals.py) · Código-fonte: [github.
 * 📡 **Dados ao vivo** — PTAX comercial (BCB), AwesomeAPI (intraday), Yahoo (DXY/Brent/VIX/etc), CFTC (COT), SELIC. Zero API keys.
 * 🔄 **Ajuste intraday** — a última cotação substitui a barra do dia antes do cálculo dos sinais.
 * 🛎️ **Alerta no navegador** — página HTML com cartão de tamanho de conversão, prazo restante e link direto pra Higlobe.
+* 📱 **Alerta no WhatsApp** — mensagem automática quando USD/BRL sobe além do seu limite (`--whatsapp`). Configure com `python configure.py`.
 * 👁️ **Modo background** — fica rodando, te avisa só quando o sinal vira.
 * 📓 **Diário automático** — toda decisão fica em `.fx_journal.csv` com `size`, `notified` e `executed`.
 * 🇧🇷 **Saída em português** — `--lang pt`.
@@ -108,6 +109,47 @@ Cada ciclo imprime tamanho sugerido + dias até prazo:
 [15:32] exchange_now  p_now=0.62  size=81%  R$ 5.1340  prazo=10d  ◈ ALERT
 ```
 
+### Alertas no WhatsApp (`--whatsapp`)
+
+Receba uma mensagem sempre que o USD/BRL subir além do limite que você definir. Setup único:
+
+```bash
+python configure.py            # CLI interativa: pede telefone, Twilio, threshold
+python configure.py --test     # envia mensagem de teste
+python configure.py --reset    # zera âncora e cooldown
+```
+
+O CLI cria um `.env` local (modo 600, no `.gitignore` — nunca vai pro repo) com:
+
+```env
+TWILIO_ACCOUNT_SID=AC...
+TWILIO_AUTH_TOKEN=...
+TWILIO_FROM=+14155238886       # sandbox da Twilio (ou seu número produtivo)
+WHATSAPP_TO=+5511912345678      # seu número em E.164
+FX_ALERT_THRESHOLD_PCT=1.0      # avisa quando subir 1% desde a âncora
+FX_ALERT_COOLDOWN_MIN=60        # no máximo 1 alerta por hora
+```
+
+Depois é só rodar com `--whatsapp`:
+
+```bash
+.venv/bin/python fx_timing.py --lang pt --watch --notify --whatsapp
+```
+
+**Como funciona a âncora:** no primeiro tick, o preço atual vira âncora. Cada novo tick é comparado contra ela. Se cair, a âncora desce junto (rastreia a mínima local). Se subir além do `threshold` e o cooldown já expirou, dispara o WhatsApp e a âncora se move pro preço atual — então o próximo alerta exige outra alta de `+threshold` da nova base.
+
+Estado fica em `.fx_whatsapp.state` (gitignored) — sobrevive a restarts. Use `--reset` após um câmbio manual para limpar.
+
+#### Pré-requisitos Twilio (5 min, grátis para testar)
+
+1. Crie uma conta em [twilio.com/try-twilio](https://www.twilio.com/try-twilio)
+2. No console, vai em **Messaging → Try it out → Send a WhatsApp message** e ative o sandbox
+3. No seu WhatsApp, envie `join <duas-palavras>` para `+1 415 523 8886` (a Twilio te mostra o código)
+4. Pegue o **Account SID** e **Auth Token** na página principal do console
+5. Rode `python configure.py` e cole os valores
+
+Sandbox tem limites de uso e exige join code; para produção sem joins, registre um WhatsApp Business number na Twilio.
+
 ### Marcar câmbio executado
 
 Depois que você fecha o câmbio na corretora, ancora o cronômetro de prazo:
@@ -177,6 +219,7 @@ fx_timing.py [--backtest] [--days DIA ...] [--lang {en,pt}]
              [--deadline-days N] [--spread-bps BPS]
              [--dca-floor FRAC] [--dca-ceiling FRAC]
              [--notify] [--watch] [--watch-interval MIN] [--name NOME]
+             [--whatsapp] [--whatsapp-threshold PCT] [--whatsapp-cooldown MIN]
              [--mark-executed] [--audit [DAYS]]
 ```
 
@@ -193,6 +236,9 @@ fx_timing.py [--backtest] [--days DIA ...] [--lang {en,pt}]
 | `--watch` | — | Modo background — re-roda em loop |
 | `--watch-interval` | `60` | Minutos entre checagens em `--watch` |
 | `--name` | `Vitor` | Nome no cabeçalho do alerta no navegador |
+| `--whatsapp` | — | Habilita alertas WhatsApp via Twilio |
+| `--whatsapp-threshold` | `1.0` | % de alta vs âncora que dispara o WhatsApp |
+| `--whatsapp-cooldown` | `60` | Minutos mínimos entre alertas WhatsApp |
 | `--mark-executed` | — | Marca última entrada do diário como executada (ancora o cronômetro) |
 | `--audit` | `30` | Imprime auditoria de *behavior gap* dos últimos N dias |
 
@@ -250,6 +296,25 @@ Renderiza `.fx_alert.html` e abre no navegador padrão.
 * `render_alert(...)` — escreve o HTML
 * `open_in_browser(path)` — abre via `webbrowser.open`
 * `alert(...)` — atalho que faz os dois
+
+### `whatsapp.py` — alerta no celular
+
+Envia mensagens via Twilio HTTP API (stdlib `urllib`, zero deps externas).
+
+* `load_env(path)` — popula `os.environ` a partir do `.env` local
+* `is_configured()` / `missing_keys()` — introspecção de config
+* `send(message)` — POST para a API da Twilio com Basic auth
+* `maybe_alert_on_rise(rate)` — lógica de âncora + threshold + cooldown
+* `reset_state()` — limpa `.fx_whatsapp.state` (âncora + cooldown)
+
+### `configure.py` — setup CLI
+
+CLI interativa que gera o `.env` (modo 600, gitignored).
+
+* Pergunta telefone com confirmação e normaliza para E.164
+* Esconde o auth token via `getpass`
+* Suporta `--test` (envia mensagem de teste) e `--reset` (limpa estado)
+* O telefone **nunca** entra no repositório
 
 ---
 
@@ -315,6 +380,7 @@ Inclua um diff de acurácia do backtest em qualquer PR de sinal.
 * 📡 **Live data** — BCB PTAX, AwesomeAPI (intraday), Yahoo, CFTC (COT), SELIC. No API keys.
 * 🔄 **Intraday-aware** — last bar replaced with the live tick before signals run.
 * 🛎️ **Browser alerts** (`--notify`) — HTML page with size card, deadline countdown and one-click Higlobe link.
+* 📱 **WhatsApp alerts** (`--whatsapp`) — ping your phone when USD/BRL rises past your threshold. Setup via `python configure.py`.
 * 👁️ **Background mode** (`--watch`).
 * 📓 **Auto journal** — every call logged to `.fx_journal.csv` with `size`, `notified`, `executed`.
 
@@ -335,9 +401,35 @@ python3 -m venv .venv
 # background with browser alerts
 .venv/bin/python fx_timing.py --watch --notify
 
+# add WhatsApp alerts on rate spikes (setup once)
+python configure.py
+.venv/bin/python fx_timing.py --watch --notify --whatsapp
+
 # backtest on your real schedule
 .venv/bin/python fx_timing.py --backtest --days 5 20 --deadline-days 15 --spread-bps 50
 ```
+
+### WhatsApp alerts setup
+
+The `configure.py` CLI interactively collects your phone, Twilio credentials, threshold and cooldown, and writes a local `.env` (mode 600, gitignored — **your phone never enters the repo**).
+
+```bash
+python configure.py            # interactive setup
+python configure.py --test     # send a test message
+python configure.py --reset    # wipe anchor + cooldown
+```
+
+What you'll need:
+
+1. A Twilio account (free trial at [twilio.com/try-twilio](https://www.twilio.com/try-twilio))
+2. Activate the WhatsApp sandbox in the console (**Messaging → Try it out → Send a WhatsApp message**)
+3. From your WhatsApp, send `join <two-words>` to `+1 415 523 8886` (Twilio shows you the code)
+4. Copy your **Account SID** and **Auth Token** from the console home
+5. Run `python configure.py` and paste them in
+
+**Anchor logic.** The first observed rate becomes the anchor. Each tick is compared to it. If the rate falls, the anchor follows down (tracks the local low). If it rises beyond `--whatsapp-threshold` and the cooldown has elapsed, a WhatsApp message fires and the anchor jumps to the current rate — so the next alert requires another `+threshold` rally from there.
+
+State is persisted in `.fx_whatsapp.state` (gitignored) and survives restarts. Use `--reset` after a manual exchange to clear it.
 
 ### CLI reference
 
@@ -346,6 +438,7 @@ fx_timing.py [--backtest] [--days DAY ...] [--lang {en,pt}]
              [--deadline-days N] [--spread-bps BPS]
              [--dca-floor FRAC] [--dca-ceiling FRAC]
              [--notify] [--watch] [--watch-interval MIN] [--name NAME]
+             [--whatsapp] [--whatsapp-threshold PCT] [--whatsapp-cooldown MIN]
              [--mark-executed] [--audit [DAYS]]
 ```
 
@@ -362,6 +455,9 @@ fx_timing.py [--backtest] [--days DAY ...] [--lang {en,pt}]
 | `--watch` | — | Background mode — re-run on a schedule |
 | `--watch-interval` | `60` | Minutes between checks in `--watch` |
 | `--name` | `Vitor` | Name shown in the browser alert |
+| `--whatsapp` | — | Enable WhatsApp alerts via Twilio |
+| `--whatsapp-threshold` | `1.0` | % rise vs anchor that fires a WhatsApp alert |
+| `--whatsapp-cooldown` | `60` | Minutes between consecutive WhatsApp alerts |
 | `--mark-executed` | — | Mark the most recent journal entry as executed |
 | `--audit` | `30` | Print behavior-gap audit for the last N days |
 
@@ -373,6 +469,8 @@ fx_timing.py [--backtest] [--days DAY ...] [--lang {en,pt}]
 | `signals.py` | Pure signal library — RSI, Bollinger %B, ADX, carry score, `build_signals` |
 | `journal.py` | Append-only CSV log of decisions, last-call summary, notify cooldown |
 | `notify.py` | HTML alert renderer (Fraunces + JetBrains Mono) and browser opener |
+| `whatsapp.py` | Twilio WhatsApp sender + anchor/threshold/cooldown logic |
+| `configure.py` | Interactive CLI that writes `.env` (gitignored) for WhatsApp creds |
 
 ### Backtest
 
