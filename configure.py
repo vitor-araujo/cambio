@@ -8,11 +8,12 @@ threshold/cooldown, writes a mode-600 `.env`. Nothing sensitive is ever
 committed.
 
 Usage:
-  python configure.py            # interactive setup
-  python configure.py --test     # send a test message using existing .env
-  python configure.py --reset    # wipe .fx_alert.state (anchor + cooldown)
-  python configure.py --force    # overwrite an existing .env
+  python configure.py                  # interactive setup
+  python configure.py --test           # send a test message using existing .env
+  python configure.py --reset          # wipe .fx_alert.state (anchor + cooldown)
+  python configure.py --force          # overwrite an existing .env
   python configure.py --provider telegram    # skip provider prompt
+  python configure.py --find-chat-id   # re-detect chat_id using existing token
 """
 
 import argparse
@@ -21,10 +22,11 @@ import os
 import sys
 import time
 from typing import Optional
+from urllib.request import urlopen
 
 import rate_alert
 from notifiers import DEFAULT_PROVIDER, ENV_VAR, available, get_notifier
-from notifiers.telegram import discover_chat_id
+from notifiers.telegram import API_BASE, discover_chat_id
 
 ENV_PATH = rate_alert.ENV_PATH
 SANDBOX_FROM = "+14155238886"  # Twilio shared WhatsApp sandbox number
@@ -92,6 +94,19 @@ def pause(label: str = "Pressione Enter quando terminar...") -> None:
         sys.exit(1)
 
 
+# ── input validators ─────────────────────────────────────────────────────────
+def is_valid_telegram_token(s: str) -> bool:
+    """Bot tokens look like `<numeric_bot_id>:<35+ alphanum/-/_ chars>`."""
+    parts = s.strip().split(":")
+    return len(parts) == 2 and parts[0].isdigit() and len(parts[1]) >= 30
+
+
+def is_valid_chat_id(s: str) -> bool:
+    """Chat ids are signed integers — positive for users, negative for groups."""
+    s = s.strip().lstrip("-")
+    return s.isdigit() and 5 <= len(s) <= 16
+
+
 # ── env IO ───────────────────────────────────────────────────────────────────
 def write_env(values: dict, path: str = ENV_PATH) -> None:
     lines = [
@@ -125,41 +140,93 @@ def setup_telegram() -> dict:
     )
     print("    • O BotFather responde com um token tipo " + dim("1234567890:AAH..."))
     print()
-    token = ask("Cole o token aqui", hide=True)
-
-    section("Passo 2 — Mandar uma mensagem pro bot")
-    print(dim("    Abra a conversa do seu bot e envie qualquer mensagem (ex: 'oi')."))
-    pause("Pressione Enter depois de mandar a mensagem...")
-
-    chat_id = None
-    for attempt in range(3):
-        print(dim(f"    Buscando chat_id (tentativa {attempt + 1}/3)..."))
-        chat_id = discover_chat_id(token)
-        if chat_id:
-            break
-        time.sleep(1.5)
-
-    if not chat_id:
-        print()
-        print(warn("    ⚠  Não consegui detectar a mensagem automaticamente."))
-        print(
-            dim(
-                "    Verifique se: (1) o token está correto, (2) você realmente\n"
-                "    mandou uma mensagem pro bot, (3) o bot não tem outras conversas\n"
-                "    recentes mascarando a sua."
-            )
-        )
-        chat_id = ask("Cole o chat_id manualmente (ou Ctrl+C pra abortar)")
-
-    print(f"    {ok('✓')} chat_id detectado: {ok(chat_id)}")
-    if not yes_no("Confirma usar esse chat?", default=True):
-        chat_id = ask("Cole o chat_id manualmente")
-
+    token = _prompt_token()
+    chat_id = _prompt_chat_id(token)
     return {
         "NOTIFIER_PROVIDER": "telegram",
         "TELEGRAM_BOT_TOKEN": token,
         "TELEGRAM_CHAT_ID": chat_id,
     }
+
+
+def _prompt_token() -> str:
+    while True:
+        token = ask("Cole o token aqui", hide=True)
+        if is_valid_telegram_token(token):
+            return token
+        print(
+            err(
+                "    ✗ Isso não parece um token válido. "
+                "Formato esperado: <numero>:<35+ caracteres>"
+            )
+        )
+        print(dim("    Ex: 1234567890:AAH1234567890abcdefghijklmnopqrstuvwx"))
+
+
+def _prompt_chat_id(token: str) -> str:
+    """Try auto-discovery, fall back to validated manual input."""
+    section("Passo 2 — Mandar uma mensagem pro bot")
+    print(
+        warn(
+            "    ❗ ATENÇÃO: a mensagem deve ser enviada NO TELEGRAM (celular ou web),\n"
+            "       NÃO aqui no terminal. Aqui você só dá Enter quando terminar."
+        )
+    )
+    print()
+    print("    • Abra o Telegram (celular ou " + _c("1;36", "web.telegram.org") + ")")
+    print("    • Busque o username do bot que você acabou de criar")
+    print("    • Mande qualquer mensagem pra ele (ex: " + _c("1", "oi") + ")")
+    print("    • Volte aqui e pressione " + _c("1", "Enter"))
+    pause("Enter quando tiver mandado a mensagem NO TELEGRAM...")
+
+    # Limpa qualquer webhook que pode estar interceptando getUpdates
+    _delete_webhook(token)
+
+    chat_id = None
+    for attempt in range(5):
+        print(dim(f"    Buscando chat_id (tentativa {attempt + 1}/5)..."))
+        chat_id = discover_chat_id(token)
+        if chat_id:
+            break
+        time.sleep(2)
+
+    if chat_id:
+        print(f"    {ok('✓')} chat_id detectado: {ok(chat_id)}")
+        if yes_no("Confirma usar esse chat?", default=True):
+            return chat_id
+
+    # manual fallback with validation
+    print()
+    print(warn("    ⚠  Vou pedir o chat_id manualmente."))
+    print(
+        dim(
+            "    Pra achá-lo: abra no navegador (com a mensagem já enviada):\n"
+            f"      {_c('1;36', f'https://api.telegram.org/bot{token[:12]}.../getUpdates')}\n"
+            '    Procure por "chat":{"id":<NUMERO>} — esse número é o chat_id.'
+        )
+    )
+    while True:
+        candidate = ask("chat_id (só números)")
+        if is_valid_chat_id(candidate):
+            return candidate.strip()
+        if ":" in candidate:
+            print(
+                err(
+                    "    ✗ Isso parece o TOKEN do bot, não o chat_id. "
+                    "O chat_id é só números."
+                )
+            )
+        else:
+            print(err("    ✗ chat_id inválido. Use apenas dígitos (ex: 123456789)."))
+
+
+def _delete_webhook(token: str) -> None:
+    """Some bots end up with a webhook set; that blocks getUpdates from returning."""
+    try:
+        url = f"{API_BASE.format(token=token)}/deleteWebhook"
+        urlopen(url, timeout=5).read()
+    except Exception:
+        pass
 
 
 def setup_whatsapp() -> dict:
@@ -332,11 +399,67 @@ def run_reset() -> None:
     print(ok(f"  ✓ estado do alerta reiniciado ({rate_alert.STATE_PATH} removido)."))
 
 
+def run_find_chat_id() -> None:
+    """Recovery flow: re-detect the Telegram chat_id and rewrite .env in place."""
+    if not rate_alert.load_env():
+        print(err(f"  ✗ {ENV_PATH} não encontrado. Rode `python configure.py`."))
+        sys.exit(1)
+
+    token = os.getenv("TELEGRAM_BOT_TOKEN")
+    if not token:
+        print(err("  ✗ TELEGRAM_BOT_TOKEN ausente no .env."))
+        sys.exit(1)
+    if not is_valid_telegram_token(token):
+        print(err("  ✗ TELEGRAM_BOT_TOKEN tem formato inválido. Refaça o setup."))
+        sys.exit(1)
+
+    chat_id = _prompt_chat_id(token)
+    _rewrite_env_key("TELEGRAM_CHAT_ID", chat_id)
+    print()
+    print(ok(f"  ✓ chat_id atualizado em {ENV_PATH}."))
+
+    # reload + test
+    os.environ["TELEGRAM_CHAT_ID"] = chat_id
+    notifier = get_notifier("telegram")
+    ok_send, info = notifier.send(
+        "🇧🇷 cambio · chat_id corrigido. Alertas voltaram a funcionar."
+    )
+    if ok_send:
+        print(ok(f"  ✓ mensagem de teste enviada ({info})."))
+    else:
+        print(err(f"  ✗ ainda falhou: {info}"))
+        sys.exit(1)
+
+
+def _rewrite_env_key(key: str, value: str, path: str = ENV_PATH) -> None:
+    """Rewrite a single key in .env, preserving everything else."""
+    with open(path, encoding="utf-8") as f:
+        lines = f.readlines()
+    out = []
+    found = False
+    for line in lines:
+        if line.strip().startswith(f"{key}="):
+            out.append(f"{key}={value}\n")
+            found = True
+        else:
+            out.append(line)
+    if not found:
+        out.append(f"{key}={value}\n")
+    with open(path, "w", encoding="utf-8") as f:
+        f.writelines(out)
+    os.chmod(path, 0o600)
+
+
 def main() -> None:
     p = argparse.ArgumentParser(description="Configure cambio rate alerts.")
     p.add_argument("--test", action="store_true", help="Send a test message and exit.")
     p.add_argument("--reset", action="store_true", help="Wipe anchor + cooldown state.")
     p.add_argument("--force", action="store_true", help="Overwrite existing .env.")
+    p.add_argument(
+        "--find-chat-id",
+        action="store_true",
+        help="Re-detect the Telegram chat_id using the existing token in .env.",
+    )
     p.add_argument(
         "--provider",
         choices=available(),
@@ -348,6 +471,8 @@ def main() -> None:
         run_test()
     elif args.reset:
         run_reset()
+    elif args.find_chat_id:
+        run_find_chat_id()
     else:
         run_setup(force=args.force, provider=args.provider)
 
