@@ -4,7 +4,7 @@
   <p align="center">
     <a href="https://github.com/vitor-araujo/cambio/blob/main/LICENSE"><img alt="MIT" src="https://img.shields.io/badge/license-MIT-22c55e?style=flat-square"></a>
     <img alt="Python 3.10+" src="https://img.shields.io/badge/python-3.10+-4B8BBE?style=flat-square&logo=python&logoColor=white">
-    <img alt="versão 0.4.2" src="https://img.shields.io/badge/version-0.4.2-fbbf24?style=flat-square">
+    <img alt="versão 0.4.3" src="https://img.shields.io/badge/version-0.4.3-fbbf24?style=flat-square">
     <img alt="sem API key" src="https://img.shields.io/badge/dados-grátis%20·%20sem%20API%20key-f59e0b?style=flat-square">
     <img alt="pt · en" src="https://img.shields.io/badge/lang-pt--BR%20·%20en-6366f1?style=flat-square">
   </p>
@@ -142,7 +142,7 @@ NOTIFIER_PROVIDER=telegram
 TELEGRAM_BOT_TOKEN=1234567890:AAH...
 TELEGRAM_CHAT_ID=123456789
 FX_ALERT_THRESHOLD_PCT=1.0
-FX_ALERT_COOLDOWN_MIN=60
+FX_ALERT_COOLDOWN_MIN=5
 ```
 
 #### Setup WhatsApp (opcional, via Twilio)
@@ -246,12 +246,12 @@ fx_timing.py [--backtest] [--days DIA ...] [--lang {en,pt}]
 | `--dca-ceiling` | `1.00` | Fração máxima quando a convicção é alta |
 | `--notify` | — | Abre alerta HTML no navegador em flip-to-AGORA |
 | `--watch` | — | Modo background — re-roda em loop |
-| `--watch-interval` | `60` | Minutos entre checagens em `--watch` |
+| `--watch-interval` | `5` | Minutos entre checagens em `--watch` |
 | `--name` | `Vitor` | Nome no cabeçalho do alerta no navegador |
 | `--phone-alerts` | — | Habilita alertas no celular (Telegram/WhatsApp) |
 | `--alert-provider` | `telegram` | Provedor: `telegram` ou `whatsapp` (override do `.env`) |
 | `--alert-threshold` | `1.0` | % de alta vs âncora que dispara o alerta |
-| `--alert-cooldown` | `60` | Minutos mínimos entre alertas |
+| `--alert-cooldown` | = `--watch-interval` | Minutos mínimos entre alertas (casa com a interval por padrão) |
 | `--mark-executed` | — | Marca última entrada do diário como executada (ancora o cronômetro) |
 | `--audit` | `30` | Imprime auditoria de *behavior gap* dos últimos N dias |
 
@@ -489,12 +489,12 @@ fx_timing.py [--backtest] [--days DAY ...] [--lang {en,pt}]
 | `--dca-ceiling` | `1.00` | Maximum fraction when conviction is high |
 | `--notify` | — | Open HTML alert on flip-to-NOW |
 | `--watch` | — | Background mode — re-run on a schedule |
-| `--watch-interval` | `60` | Minutes between checks in `--watch` |
+| `--watch-interval` | `5` | Minutes between checks in `--watch` |
 | `--name` | `Vitor` | Name shown in the browser alert |
 | `--phone-alerts` | — | Enable phone alerts (Telegram or WhatsApp) |
 | `--alert-provider` | `telegram` | Backend: `telegram` or `whatsapp` (overrides `.env`) |
 | `--alert-threshold` | `1.0` | % rise vs anchor that fires an alert |
-| `--alert-cooldown` | `60` | Minutes between consecutive alerts |
+| `--alert-cooldown` | = `--watch-interval` | Minutes between consecutive alerts (matches the watch interval by default) |
 | `--mark-executed` | — | Mark the most recent journal entry as executed |
 | `--audit` | `30` | Print behavior-gap audit for the last N days |
 

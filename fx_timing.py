@@ -10,7 +10,7 @@ USD/BRL Exchange Timing Model
 pip install yfinance pandas numpy
 """
 
-__version__ = "0.4.2"
+__version__ = "0.4.3"
 
 import argparse
 import io
@@ -185,7 +185,7 @@ AMOUNT = 10_000  # USD per scenario
 REGIME_STRENGTH = 0.55  # how hard the regime filter shifts probabilities
 DEFAULT_SPREAD_BPS = 50  # 0.50 % effective spread (Wise-class fintech, pre-IOF)
 DEFAULT_USER_NAME = "Vitor"  # used in the HTML alert headline
-WATCH_INTERVAL_MIN = 60  # minutes between checks in --watch mode
+WATCH_INTERVAL_MIN = 5  # minutes between checks in --watch mode
 NOTIFY_THRESHOLD = 0.55  # min p_now to trigger browser alert
 NOTIFY_COOLDOWN_HOURS = 6  # don't re-open the alert within this window
 
@@ -1622,10 +1622,12 @@ def main() -> None:
         args.alert_threshold = float(
             os.getenv("FX_ALERT_THRESHOLD_PCT", rate_alert.DEFAULT_THRESHOLD_PCT)
         )
+    # Cooldown defaults to watch-interval (single source of truth) unless the
+    # user explicitly overrides via flag or .env. This keeps the two values in
+    # sync: every check that crosses the threshold can fire an alert.
     if args.alert_cooldown is None:
-        args.alert_cooldown = int(
-            os.getenv("FX_ALERT_COOLDOWN_MIN", rate_alert.DEFAULT_COOLDOWN_MIN)
-        )
+        env_cooldown = os.getenv("FX_ALERT_COOLDOWN_MIN")
+        args.alert_cooldown = int(env_cooldown) if env_cooldown else args.watch_interval
     if args.alert_provider is None:
         args.alert_provider = os.getenv(ENV_VAR, DEFAULT_PROVIDER)
 

@@ -334,8 +334,13 @@ def run_setup(force: bool = False, provider: Optional[str] = None) -> None:
     threshold = ask("Threshold %", default="1.0")
 
     section("Cooldown (minutos entre alertas)")
-    print(dim("    Padrão 60 = no máximo 1 alerta por hora."))
-    cooldown = ask("Cooldown (min)", default="60")
+    print(
+        dim(
+            "    Padrão 5 = casa com o intervalo do --watch.\n"
+            "    Mantenha igual ao watch-interval pra não perder oportunidades."
+        )
+    )
+    cooldown = ask("Cooldown (min)", default="5")
 
     values = {
         **creds,

@@ -19,7 +19,7 @@ from notifiers import Notifier, get_notifier
 ENV_PATH = ".env"
 STATE_PATH = ".fx_alert.state"
 DEFAULT_THRESHOLD_PCT = 1.0
-DEFAULT_COOLDOWN_MIN = 60
+DEFAULT_COOLDOWN_MIN = 5
 
 
 # ── env file loader (no python-dotenv dependency) ────────────────────────────
