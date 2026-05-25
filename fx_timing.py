@@ -6,11 +6,14 @@ USD/BRL Exchange Timing Model
   python fx_timing.py --notify         — HTML alert in the browser on flip-to-NOW
   python fx_timing.py --watch --notify — background mode with auto-alerts
   python fx_timing.py --backtest       — walk-forward backtest (2nd & 17th since 2022)
+  python fx_timing.py --show-journal   — CLI table of recent signals
+  python fx_timing.py --audit          — behavior-gap audit (last 30 days)
+  python server.py --dev               — web dashboard (SQLite + charts + Telegram config)
 
 pip install yfinance pandas numpy
 """
 
-__version__ = "0.4.4"
+__version__ = "0.5.0"
 
 import argparse
 import io
@@ -28,7 +31,7 @@ import numpy as np
 import pandas as pd
 import yfinance as yf
 
-import journal
+import journal_db as journal
 import notify
 import rate_alert
 from notifiers import DEFAULT_PROVIDER, ENV_VAR, available, get_notifier
@@ -1613,6 +1616,15 @@ def main() -> None:
         metavar="DAYS",
         help="Print behavior-gap audit for the last N days (default: 30) and exit.",
     )
+    parser.add_argument(
+        "--show-journal",
+        type=int,
+        nargs="?",
+        const=20,
+        default=None,
+        metavar="N",
+        help="Print recent journal entries (default: 20) and exit.",
+    )
     args = parser.parse_args()
 
     global _LANG
@@ -1655,6 +1667,10 @@ def main() -> None:
             f"\n  ✓  marcado como executado: {entry.ts.strftime('%d/%m/%Y %H:%M')}  "
             f"· {entry.decision.upper()} @ R$ {entry.rate_signal:.4f} · size {entry.size:.0%}\n"
         )
+        return
+
+    if args.show_journal is not None:
+        journal.show_journal(limit=args.show_journal)
         return
 
     if args.audit is not None:

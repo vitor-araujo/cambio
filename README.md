@@ -20,17 +20,19 @@ Documentação dos sinais: [`signals.py`](signals.py) · Código-fonte: [github.
 
 ## Recursos
 
-* 🎯 **Sizing Vanguard-DCA** — cada ciclo converte uma fração entre `--dca-floor` (25 %) e `--dca-ceiling` (100 %), proporcional à convicção. Nunca zero, nunca tudo no escuro — minimiza variância de arrependimento.
-* ⚖️ **Validador Cost-Matters** — o backtest declara se a vantagem do modelo sobrepassa **2× spread** (margem de segurança Bogle). Caso contrário, sinaliza "INSIDE THE SPREAD".
-* ⏱️ **Cronômetro de prazo** — o `--watch` mostra quantos dias faltam até a execução forçada, ancorado em `--mark-executed`.
-* 📊 **Auditoria de comportamento** — `--audit` mostra quantos alertas você ignorou nos últimos 30 dias (sua *behavior gap*).
-* 📡 **Dados ao vivo** — PTAX comercial (BCB), AwesomeAPI (intraday), Yahoo (DXY/Brent/VIX/etc), CFTC (COT), SELIC. Zero API keys.
-* 🔄 **Ajuste intraday** — a última cotação substitui a barra do dia antes do cálculo dos sinais.
-* 🛎️ **Alerta no navegador** — página HTML com cartão de tamanho de conversão, prazo restante e link direto pra Higlobe.
-* 📱 **Alertas no celular** — mensagem automática quando USD/BRL sobe além do seu limite (`--phone-alerts`). Telegram por padrão, WhatsApp opcional via Twilio. Configure com `python configure.py`.
-* 👁️ **Modo background** — fica rodando, te avisa só quando o sinal vira.
-* 📓 **Diário automático** — toda decisão fica em `.fx_journal.csv` com `size`, `notified` e `executed`.
+* 🎯 **Sizing Vanguard-DCA** — cada ciclo converte uma fração entre `--dca-floor` (25 %) e `--dca-ceiling` (75 %), proporcional à convicção. Nunca zero, nunca tudo.
+* ⚖️ **Validador Cost-Matters** — o backtest declara se a vantagem do modelo sobrepassa **2× spread** (margem de segurança Bogle).
+* ⏱️ **Cronômetro de prazo** — o `--watch` mostra quantos dias faltam até a execução forçada.
+* 📊 **Auditoria de comportamento** — `--audit` mostra quantos alertas você ignorou (behavior gap).
+* 🖥️ **Dashboard web** — `python server.py --dev` sobe uma UI React com charts (USD/BRL + p(agora)), últimos 10 sinais, configuração de thresholds e Telegram pelo navegador. Journal em SQLite.
+* 📡 **Dados ao vivo** — PTAX (BCB), AwesomeAPI (intraday), Yahoo (DXY/Brent/VIX), CFTC (COT), SELIC. Zero API keys.
+* 🔄 **Ajuste intraday** — a última cotação substitui a barra do dia no cálculo dos sinais.
+* 🛎️ **Alerta no navegador** — página HTML com cartão de tamanho, prazo restante e link pra Higlobe.
+* 📱 **Alertas no celular** — Telegram por padrão, WhatsApp opcional via Twilio. Configure pelo UI ou `python configure.py`.
+* 👁️ **Modo background** — `--watch` fica rodando, avisa só quando o sinal vira.
+* 📓 **Diário SQLite** — toda decisão em `.fx_journal.db` com `size`, `notified` e `executed`. CSV anterior migrado automaticamente.
 * 🇧🇷 **Saída em português** — `--lang pt`.
+* 🧪 **Testes de API** — `python test_server.py` valida todos os endpoints.
 
 ---
 
@@ -338,6 +340,94 @@ CLI interativa que gera o `.env` (modo 600, gitignored).
 * Nada sensível **nunca** entra no repositório
 
 ---
+
+## Monitoramento UI
+
+Dashboard web com charts (p(agora) + USD/BRL), últimos 10 sinais, configuração
+de thresholds e Telegram pelo navegador.
+
+O journal usa **SQLite** (`.fx_journal.db`). O CSV anterior é migrado
+automaticamente.
+
+### Rodando com UI
+
+```bash
+# Primeira vez:
+cd ui && npm install
+
+# Sempre:
+python server.py --dev
+```
+
+Abre http://localhost:5173. Um comando sobe API + Vite.
+
+### Rodando em background (sem UI)
+
+```bash
+python fx_timing.py --watch --notify --phone-alerts
+```
+
+Monitora a cada 5 min, abre alerta HTML quando p(agora) ≥ 40%, e manda alerta
+no Telegram quando USD/BRL sobe +1% vs âncora.
+
+Flags úteis:
+
+| Flag | Efeito |
+|---|---|
+| `--watch` | Loop contínuo |
+| `--watch-interval 10` | A cada 10 min |
+| `--notify` | Abre alerta HTML no navegador |
+| `--phone-alerts` | Envia Telegram |
+| `--alert-threshold 2.0` | Dispara com +2% de alta |
+| `--lang pt` | Saída em português |
+
+### Telegram pelo UI
+
+Na aba **Telegram** você configura o bot sem terminal:
+
+1. Crie um bot com @BotFather
+2. Cole o token
+3. Mande qualquer mensagem pro bot
+4. Clique **Testar envio** — o chat_id é descoberto automaticamente
+
+A configuração é salva no `.env` (já no .gitignore).
+
+### Journal via CLI
+
+```bash
+python fx_timing.py --show-journal       # últimos 20 sinais
+python fx_timing.py --show-journal 50    # últimos 50 sinais
+```
+
+### Health check
+
+```bash
+curl http://127.0.0.1:8765/api/health
+```
+
+Retorna `{ healthy, uptime_seconds, db, state, thresholds, env }`. Útil para
+monitorar se o servidor está rodando.
+
+### Testes
+
+```bash
+python server.py &           # inicia o servidor
+python test_server.py         # roda todos os testes de API
+```
+
+### Thresholds configuráveis (via UI ou API)
+
+| Threshold | Padrão | Descrição |
+|---|---|---|
+| `watch_interval_min` | 5 | Minutos entre checks |
+| `notify_threshold` | 0.40 | p(agora) mínimo para alerta HTML |
+| `notify_cooldown_hours` | 6 | Horas entre alertas HTML |
+| `alert_threshold_pct` | 1.0 | % de alta vs âncora para Telegram |
+| `alert_cooldown_min` | 5 | Minutos entre alertas Telegram |
+| `dca_floor` | 0.25 | Fração mínima Vanguard-DCA |
+| `dca_ceiling` | 0.75 | Fração máxima Vanguard-DCA |
+| `spread_bps` | 50 | Spread efetivo em basis points |
+| `deadline_days` | 15 | Dias até execução forçada |
 
 ## Diário e alertas
 

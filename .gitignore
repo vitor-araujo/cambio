@@ -39,5 +39,13 @@ Thumbs.db
 
 # Local journal & alert artifacts
 .fx_journal.csv
+.fx_journal.db
+.fx_journal.db-wal
+.fx_journal.db-shm
 .fx_alert.html
 .fx_alert.state
+.fx_thresholds.json
+
+# UI
+ui/node_modules/
+ui/dist/
