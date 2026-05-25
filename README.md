@@ -4,7 +4,7 @@
   <p align="center">
     <a href="https://github.com/vitor-araujo/cambio/blob/main/LICENSE"><img alt="MIT" src="https://img.shields.io/badge/license-MIT-22c55e?style=flat-square"></a>
     <img alt="Python 3.10+" src="https://img.shields.io/badge/python-3.10+-4B8BBE?style=flat-square&logo=python&logoColor=white">
-    <img alt="versão 0.4.4" src="https://img.shields.io/badge/version-0.4.4-fbbf24?style=flat-square">
+    <img alt="versão 0.5.0" src="https://img.shields.io/badge/version-0.5.0-2563eb?style=flat-square">
     <img alt="sem API key" src="https://img.shields.io/badge/dados-grátis%20·%20sem%20API%20key-f59e0b?style=flat-square">
     <img alt="pt · en" src="https://img.shields.io/badge/lang-pt--BR%20·%20en-6366f1?style=flat-square">
   </p>
@@ -12,9 +12,23 @@
 
 ---
 
-**cambio** é um modelo probabilístico que decide **quanto** você converte de dólar a cada ciclo. Roda 12 sinais quantitativos sobre dados públicos, aplica disciplina Vanguard-DCA (nunca zero, nunca 100 % no escuro), e te avisa no navegador quando a convicção estiver alta o suficiente para subir o tamanho da conversão.
+### O que é
 
-Documentação dos sinais: [`signals.py`](signals.py) · Código-fonte: [github.com/vitor-araujo/cambio](https://github.com/vitor-araujo/cambio)
+Modelo probabilístico open-source que analisa 12 sinais quantitativos (momentum, RSI, carry, COT, etc.) sobre dados públicos de mercado pra responder **se é hora de converter USD → BRL**.
+
+### O que faz
+
+A cada ciclo decide **quanto** converter do seu saldo — nunca zero, nunca tudo — usando disciplina Vanguard-DCA com floor e ceiling configuráveis. Se a convicção for alta, abre um alerta no navegador com o cartão de tamanho sugerido e o link direto pra corretora.
+
+### Como usar
+
+```bash
+pip install yfinance pandas numpy
+python fx_timing.py --watch --notify --phone-alerts   # modo background
+python server.py --dev                                 # dashboard web
+```
+
+Modo background monitora sozinho e dispara alertas HTML + Telegram. O dashboard web mostra charts, thresholds e configuração do bot sem terminal.
 
 ---
 
