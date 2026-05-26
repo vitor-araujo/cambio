@@ -212,7 +212,7 @@ class CambioHandler(SimpleHTTPRequestHandler):
                     "state": load_state(),
                     "thresholds": load_thresholds(),
                     "last_signal": _entry_dict(last) if last else None,
-                    "recent_signals": [_entry_dict(e) for e in entries[:10]],
+                    "recent_signals": [_entry_dict(e) for e in entries[:50]],
                     "total_signals": len(entries),
                     "total_alerts": len([e for e in entries if e.notified]),
                     "recent_alerts": [_entry_dict(e) for e in notified],

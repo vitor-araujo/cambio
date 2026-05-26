@@ -1,4 +1,8 @@
 <p align="center">
+  <img src="docs/header.png" alt="cambio monitor" width="100%" />
+</p>
+
+<p align="center">
   <h1 align="center">cambio</h1>
   <p align="center"><em>Timing quantitativo para câmbio USD → BRL.</em></p>
   <p align="center">
@@ -358,46 +362,65 @@ CLI interativa que gera o `.env` (modo 600, gitignored).
 ## Monitoramento UI
 
 Dashboard web com charts (p(agora) + USD/BRL), últimos 10 sinais, configuração
-de thresholds e Telegram pelo navegador.
+de thresholds e Telegram pelo navegador. A aba **CLI** lista todos os comandos
+prontos para copiar.
 
 O journal usa **SQLite** (`.fx_journal.db`). O CSV anterior é migrado
 automaticamente.
 
-### Rodando com UI
+### Início rápido
 
 ```bash
-# Primeira vez:
-cd ui && npm install
-
-# Sempre:
+# UI + API (uma comando):
 python server.py --dev
-```
+# → http://localhost:5173
 
-Abre http://localhost:5173. Um comando sobe API + Vite.
-
-### Rodando em background (sem UI)
-
-```bash
+# Monitoramento background:
 python fx_timing.py --watch --notify --phone-alerts
+
+# Análise pontual:
+python fx_timing.py --lang pt
 ```
 
-Monitora a cada 5 min, abre alerta HTML quando p(agora) ≥ 40%, e manda alerta
-no Telegram quando USD/BRL sobe +1% vs âncora.
+### Comandos essenciais
 
-Flags úteis:
-
-| Flag | Efeito |
+| Comando | Descrição |
 |---|---|
-| `--watch` | Loop contínuo |
-| `--watch-interval 10` | A cada 10 min |
-| `--notify` | Abre alerta HTML no navegador |
-| `--phone-alerts` | Envia Telegram |
-| `--alert-threshold 2.0` | Dispara com +2% de alta |
-| `--lang pt` | Saída em português |
+| `python server.py --dev` | Dashboard web (API + Vite) |
+| `python fx_timing.py --watch --notify --phone-alerts` | Monitoramento completo |
+| `python fx_timing.py` | Análise pontual |
+| `python fx_timing.py --lang pt --notify` | Análise em PT-BR com alerta |
+| `python configure.py` | Setup Telegram (interativo) |
+| `python fx_timing.py --show-journal` | Últimos 20 sinais |
+| `python fx_timing.py --audit` | Auditoria 30 dias |
+| `python fx_timing.py --backtest` | Walk-forward backtest |
+| `python fx_timing.py --mark-executed` | Marca câmbio como executado |
+| `curl http://127.0.0.1:8765/api/health` | Health check API |
+
+### Flags
+
+| Flag | Padrão | Descrição |
+|---|---|---|
+| `--watch` | — | Loop contínuo |
+| `--watch-interval` | 5 | Minutos entre checks |
+| `--notify` | — | Abre alerta HTML no navegador |
+| `--phone-alerts` | — | Envia alertas via Telegram |
+| `--alert-threshold` | 1.0 | % de alta vs âncora para alertar |
+| `--alert-cooldown` | = watch-interval | Minutos entre alertas |
+| `--dca-floor` | 0.25 | Fração mínima por conversão |
+| `--dca-ceiling` | 0.75 | Fração máxima por conversão |
+| `--spread-bps` | 50 | Spread em basis points |
+| `--deadline-days` | 15 | Prazo máximo em dias |
+| `--lang` | en | Idioma (`en` / `pt`) |
+| `--mark-executed` | — | Marca último sinal como executado |
+| `--show-journal` | — | Mostra últimos N sinais (padrão 20) |
+| `--audit` | — | Auditoria dos últimos N dias (padrão 30) |
+| `--backtest` | — | Walk-forward backtest |
+| `--days` | 2 17 | Dia(s) do mês para backtest |
 
 ### Telegram pelo UI
 
-Na aba **Telegram** você configura o bot sem terminal:
+Na aba **Telegram** configure o bot sem terminal:
 
 1. Crie um bot com @BotFather
 2. Cole o token
@@ -406,21 +429,21 @@ Na aba **Telegram** você configura o bot sem terminal:
 
 A configuração é salva no `.env` (já no .gitignore).
 
-### Journal via CLI
+### API
 
-```bash
-python fx_timing.py --show-journal       # últimos 20 sinais
-python fx_timing.py --show-journal 50    # últimos 50 sinais
-```
+Todos os endpoints estão disponíveis em `http://127.0.0.1:8765/api/`:
 
-### Health check
-
-```bash
-curl http://127.0.0.1:8765/api/health
-```
-
-Retorna `{ healthy, uptime_seconds, db, state, thresholds, env }`. Útil para
-monitorar se o servidor está rodando.
+| Endpoint | Método | Descrição |
+|---|---|---|
+| `/dashboard` | GET | Resumo + últimos sinais |
+| `/journal` | GET | Journal completo |
+| `/state` | GET | Estado do alerta (âncora, cooldown) |
+| `/thresholds` | GET | Thresholds atuais |
+| `/thresholds` | POST | Atualiza thresholds |
+| `/notifier` | GET | Status configuração Telegram |
+| `/notifier` | POST | Salva configuração Telegram |
+| `/notifier/test` | POST | Envia mensagem de teste |
+| `/health` | GET | Health check |
 
 ### Testes
 

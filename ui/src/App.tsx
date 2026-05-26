@@ -63,7 +63,7 @@ interface DashboardData {
   recent_alerts: JournalEntry[];
 }
 
-type Tab = "dashboard" | "history" | "alerts" | "phone" | "thresholds";
+type Tab = "dashboard" | "history" | "alerts" | "phone" | "thresholds" | "cli";
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -97,10 +97,262 @@ function fmtTs(ts: string): string {
   }
 }
 
+function useCopy() {
+  const [copied, setCopied] = useState<string | null>(null);
+  const copy = useCallback((text: string, id: string) => {
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(id);
+      setTimeout(() => setCopied(null), 1500);
+    });
+  }, []);
+  return { copied, copy };
+}
+
+// ── CLI command reference ────────────────────────────────────────────────────
+
+const CLI_SECTIONS = [
+  {
+    title: "Iniciar",
+    desc: "Comandos para iniciar o monitoramento.",
+    cmds: [
+      {
+        label: "Monitoramento",
+        code: "python fx_timing.py --watch --notify --phone-alerts",
+      },
+      { label: "Dashboard", code: "python server.py --dev" },
+      { label: "Análise única", code: "python fx_timing.py" },
+      { label: "PT-BR", code: "python fx_timing.py --lang pt --notify" },
+    ],
+  },
+  {
+    title: "Configuração",
+    desc: "Ajuste thresholds e configure alertas.",
+    cmds: [
+      { label: "Setup Telegram", code: "python configure.py" },
+      {
+        label: "Intervalo custom",
+        code: "python fx_timing.py --watch --watch-interval 10",
+      },
+      {
+        label: "Limiar de alerta",
+        code: "python fx_timing.py --watch --alert-threshold 2.0",
+      },
+      {
+        label: "Cooldown alerta",
+        code: "python fx_timing.py --watch --alert-cooldown 30",
+      },
+    ],
+  },
+  {
+    title: "Diário & Auditoria",
+    desc: "Consulte o histórico e auditoria de sinais.",
+    cmds: [
+      { label: "Ver sinais", code: "python fx_timing.py --show-journal" },
+      { label: "Últimos 50", code: "python fx_timing.py --show-journal 50" },
+      { label: "Auditoria 30d", code: "python fx_timing.py --audit" },
+      { label: "Auditoria 90d", code: "python fx_timing.py --audit 90" },
+    ],
+  },
+  {
+    title: "Backtest & Marcações",
+    desc: "Backtest para validar estratégia e marcar execuções.",
+    cmds: [
+      { label: "Backtest padrão", code: "python fx_timing.py --backtest" },
+      {
+        label: "Dias custom",
+        code: "python fx_timing.py --backtest --days 5 20",
+      },
+      {
+        label: "Prazo forçado",
+        code: "python fx_timing.py --backtest --deadline-days 15",
+      },
+      {
+        label: "Marcar executado",
+        code: "python fx_timing.py --mark-executed",
+      },
+    ],
+  },
+];
+
+const CLI_FLAGS = [
+  { flag: "--watch", desc: "Loop contínuo de checagem" },
+  { flag: "--notify", desc: "Abre alerta HTML no navegador" },
+  { flag: "--phone-alerts", desc: "Envia alertas via Telegram" },
+  { flag: "--watch-interval N", desc: "Minutos entre checks (padrão: 5)" },
+  {
+    flag: "--alert-threshold N",
+    desc: "% de alta vs âncora para alerta (padrão: 1.0)",
+  },
+  { flag: "--alert-cooldown N", desc: "Minutos entre alertas Telegram" },
+  {
+    flag: "--dca-floor FRAC",
+    desc: "Fração mínima por conversão (padrão: 0.25)",
+  },
+  {
+    flag: "--dca-ceiling FRAC",
+    desc: "Fração máxima por conversão (padrão: 0.75)",
+  },
+  { flag: "--deadline-days N", desc: "Prazo máximo em dias (padrão: 15)" },
+  { flag: "--spread-bps N", desc: "Spread em basis points (padrão: 50)" },
+  { flag: "--lang pt|en", desc: "Idioma de saída" },
+  { flag: "--mark-executed", desc: "Marca último sinal como executado" },
+  { flag: "--show-journal [N]", desc: "Mostra últimos N sinais" },
+  { flag: "--audit [N]", desc: "Auditoria dos últimos N dias" },
+];
+
 // ── components ────────────────────────────────────────────────────────────────
 
 function Spinner() {
   return <span className="spinner" />;
+}
+
+const BROKERS = [
+  { name: "Higlobe", url: "https://app.higlobe.com/login" },
+  { name: "Husky", url: "https://app.husky.com.br/login" },
+  { name: "TechFX", url: "https://techfx.com.br/login" },
+];
+const PREF_KEY = "cambio-broker";
+
+function BrokerButton({ pNow }: { pNow: number | null }) {
+  const [open, setOpen] = useState(false);
+  const [pref, setPref] = useState<string>(
+    () => localStorage.getItem(PREF_KEY) || "Higlobe",
+  );
+  const hot = pNow != null && pNow >= 0.5;
+  const warm = pNow != null && pNow >= 0.4;
+  const choice = BROKERS.find((b) => b.name === pref) || BROKERS[0];
+
+  const pick = (name: string) => {
+    setPref(name);
+    localStorage.setItem(PREF_KEY, name);
+    setOpen(false);
+  };
+
+  if (pNow == null) return null;
+
+  return (
+    <div className="broker-wrap">
+      <button
+        className={`broker-trigger ${hot ? "broker-hot" : warm ? "broker-warm" : "broker-cold"}`}
+        onClick={() => {
+          if (hot) window.open(choice.url, "_blank");
+          else setOpen((v) => !v);
+        }}
+        title={
+          hot
+            ? `p(agora) ≥ 50% — abrir ${choice.name}`
+            : warm
+              ? "p(agora) subindo…"
+              : "p(agora) < 40%"
+        }
+      >
+        <span className="broker-icon">↗</span>
+        <span className="broker-label">
+          {hot ? choice.name : warm ? "Quase…" : "Aguardar"}
+        </span>
+        {hot && <span className="broker-pulse" />}
+      </button>
+      {open && (
+        <div className="broker-menu">
+          <div className="broker-menu-title">Corretora padrão</div>
+          {BROKERS.map((b) => (
+            <button
+              key={b.name}
+              className={`broker-link ${b.name === pref ? "broker-active" : ""}`}
+              onClick={() => pick(b.name)}
+            >
+              {b.name}
+              {b.name === pref && <span className="broker-check">✓</span>}
+            </button>
+          ))}
+          <a
+            href={choice.url}
+            target="_blank"
+            rel="noopener"
+            className="broker-open"
+          >
+            Abrir {choice.name}
+          </a>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── live pulse indicator ────────────────────────────────────────────────────
+
+function LivePulse({
+  intervalSec,
+  lastSignalTs,
+}: {
+  intervalSec: number;
+  lastSignalTs: string | null;
+}) {
+  // Anchor = timestamp of the last recorded signal.
+  // Progress = time elapsed since that signal / watch interval.
+  // This means refreshing the page keeps the same ring position —
+  // it's tied to the actual data, not the frontend fetch.
+  const anchorMs = lastSignalTs ? new Date(lastSignalTs).getTime() : 0;
+  const intervalMs = intervalSec * 1000;
+  const [progress, setProgress] = useState(() =>
+    anchorMs ? Math.min((Date.now() - anchorMs) / intervalMs, 1) : 0,
+  );
+
+  useEffect(() => {
+    if (!anchorMs) return;
+    let rafId: number;
+    const tick = () => {
+      setProgress(Math.min((Date.now() - anchorMs) / intervalMs, 1));
+      rafId = requestAnimationFrame(tick);
+    };
+    rafId = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(rafId);
+  }, [anchorMs, intervalMs]);
+
+  if (!anchorMs) return null;
+
+  const remaining = Math.max(0, intervalSec * (1 - progress));
+  const min = Math.floor(remaining / 60);
+  const sec = Math.floor(remaining % 60);
+  const timeStr =
+    min > 0 ? `${min}:${String(sec).padStart(2, "0")}` : `${sec}s`;
+
+  const r = 18;
+  const circ = 2 * Math.PI * r;
+  const dash = circ * progress;
+
+  return (
+    <div className="live-pulse">
+      <div className="live-ring">
+        <svg viewBox="0 0 44 44" width="44" height="44">
+          <circle
+            cx="22"
+            cy="22"
+            r={r}
+            fill="none"
+            stroke="var(--border)"
+            strokeWidth="2.5"
+          />
+          <circle
+            cx="22"
+            cy="22"
+            r={r}
+            fill="none"
+            stroke="var(--accent)"
+            strokeWidth="2.5"
+            strokeDasharray={`${dash} ${circ - dash}`}
+            strokeLinecap="round"
+            transform="rotate(-90 22 22)"
+          />
+        </svg>
+        <div className="live-dot" />
+      </div>
+      <div className="live-info">
+        <span className="live-label">próxima coleta em</span>
+        <span className="live-countdown">{timeStr}</span>
+      </div>
+    </div>
+  );
 }
 
 function DecisionBadge({
@@ -183,10 +435,16 @@ function Dashboard({ data }: { data: DashboardData }) {
   const anchor = (state as Record<string, number | undefined>).anchor_rate;
   const lastAlertTs = (state as Record<string, string | undefined>)
     .last_alert_ts;
+  const lastRate =
+    recent_signals[0]?.rate_live || recent_signals[0]?.rate_signal;
 
-  // Chart data: last 20 entries. Compute p(agora) range to center the line.
+  // Hero: latest rate big display
+  const lastDecision = recent_signals[0];
+  const watchIntervalSec = (thresholds.watch_interval_min || 5) * 60;
+
+  // Chart data: last 30 entries.
   const chartRaw = [...recent_signals]
-    .slice(0, 20)
+    .slice(0, 30)
     .reverse()
     .map((e) => {
       const d = new Date(e.ts);
@@ -204,7 +462,7 @@ function Dashboard({ data }: { data: DashboardData }) {
       };
     });
 
-  // Annotate day changes so the first entry of each day shows DD/MM HH:MM.
+  // Annotate day changes.
   for (let i = 0; i < chartRaw.length; i++) {
     const d = new Date(chartRaw[i].ts);
     const dayKey = `${d.getDate()}/${d.getMonth() + 1}`;
@@ -216,7 +474,7 @@ function Dashboard({ data }: { data: DashboardData }) {
 
   const chartData = chartRaw.map((d) => ({ ...d, tick: d.label }));
 
-  // Center p(agora) Y-axis so the line floats in the middle.
+  // Center p(agora) Y-axis.
   const pVals = chartData.map((d) => d.p_now);
   const pMin = Math.min(...pVals);
   const pMax = Math.max(...pVals);
@@ -226,6 +484,46 @@ function Dashboard({ data }: { data: DashboardData }) {
 
   return (
     <>
+      {/* Broker button */}
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "flex-end",
+          marginBottom: "0.5rem",
+        }}
+      >
+        <BrokerButton pNow={lastDecision?.p_now ?? null} />
+      </div>
+
+      {/* Hero rate */}
+      {lastRate != null && (
+        <div className="hero-rate">
+          <div className="rate-value">R$ {lastRate.toFixed(4)}</div>
+          <div className="rate-label">USD/BRL</div>
+          {lastDecision && (
+            <div className="hero-meta">
+              <span>
+                <DecisionBadge
+                  decision={lastDecision.decision}
+                  size={lastDecision.size}
+                />
+              </span>
+              <span>
+                p(agora){" "}
+                <strong className="up">{fmtPct(lastDecision.p_now)}</strong>
+              </span>
+              <span>
+                regime{" "}
+                <strong className={lastDecision.regime >= 0 ? "up" : "down"}>
+                  {lastDecision.regime >= 0 ? "+" : ""}
+                  {lastDecision.regime.toFixed(2)}
+                </strong>
+              </span>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* metrics */}
       <div className="metric-grid">
         <div className="metric">
@@ -245,7 +543,7 @@ function Dashboard({ data }: { data: DashboardData }) {
           <div className="metric-label">Âncora</div>
           <div
             className="metric-value"
-            style={{ color: anchor ? "var(--accent)" : undefined }}
+            style={{ color: anchor ? "var(--accent-bright)" : undefined }}
           >
             {anchor ? `R$ ${anchor.toFixed(2)}` : "—"}
           </div>
@@ -279,7 +577,7 @@ function Dashboard({ data }: { data: DashboardData }) {
               <div className="chart-legend-item">
                 <span
                   className="chart-legend-swatch"
-                  style={{ background: "#2563eb" }}
+                  style={{ background: "#818cf8" }}
                 />{" "}
                 USD/BRL
               </div>
@@ -290,7 +588,7 @@ function Dashboard({ data }: { data: DashboardData }) {
                       width: 6,
                       height: 6,
                       borderRadius: "50%",
-                      background: "#dc2626",
+                      background: "#f87171",
                       display: "inline-block",
                     }}
                   />
@@ -299,7 +597,7 @@ function Dashboard({ data }: { data: DashboardData }) {
                       width: 6,
                       height: 6,
                       borderRadius: "50%",
-                      background: "#d97706",
+                      background: "#fbbf24",
                       display: "inline-block",
                     }}
                   />
@@ -308,7 +606,7 @@ function Dashboard({ data }: { data: DashboardData }) {
                       width: 6,
                       height: 6,
                       borderRadius: "50%",
-                      background: "#16a34a",
+                      background: "#34d399",
                       display: "inline-block",
                     }}
                   />
@@ -330,7 +628,7 @@ function Dashboard({ data }: { data: DashboardData }) {
                 <YAxis
                   yAxisId="rate"
                   orientation="left"
-                  tick={{ fill: "#2563eb", fontSize: 9 }}
+                  tick={{ fill: "#818cf8", fontSize: 9 }}
                   tickLine={false}
                   axisLine={{ stroke: "var(--border)" }}
                   domain={["auto", "auto"]}
@@ -339,7 +637,7 @@ function Dashboard({ data }: { data: DashboardData }) {
                 <YAxis
                   yAxisId="pct"
                   orientation="right"
-                  tick={{ fill: "#16a34a", fontSize: 9 }}
+                  tick={{ fill: "#34d399", fontSize: 9 }}
                   tickLine={false}
                   axisLine={{ stroke: "var(--border)" }}
                   domain={[pLower, pUpper]}
@@ -359,27 +657,27 @@ function Dashboard({ data }: { data: DashboardData }) {
                   yAxisId="pct"
                   y1={0}
                   y2={40}
-                  fill="#fecaca"
-                  fillOpacity={0.25}
+                  fill="#f87171"
+                  fillOpacity={0.08}
                 />
                 <ReferenceArea
                   yAxisId="pct"
                   y1={40}
                   y2={50}
-                  fill="#fde68a"
-                  fillOpacity={0.25}
+                  fill="#fbbf24"
+                  fillOpacity={0.08}
                 />
                 <ReferenceArea
                   yAxisId="pct"
                   y1={50}
                   y2={100}
-                  fill="#bbf7d0"
-                  fillOpacity={0.25}
+                  fill="#34d399"
+                  fillOpacity={0.08}
                 />
                 <Bar
                   yAxisId="rate"
                   dataKey="rate"
-                  fill="#2563eb"
+                  fill="#818cf8"
                   fillOpacity={0.85}
                   radius={[2, 2, 0, 0]}
                   barSize={9}
@@ -389,13 +687,13 @@ function Dashboard({ data }: { data: DashboardData }) {
                   yAxisId="pct"
                   type="monotone"
                   dataKey="p_now"
-                  stroke="#78716c"
+                  stroke="#8b8a87"
                   strokeWidth={2.5}
                   dot={(props: any) => {
                     const { cx, cy, payload } = props;
                     const v = payload.p_now;
                     const fill =
-                      v >= 50 ? "#16a34a" : v >= 40 ? "#d97706" : "#dc2626";
+                      v >= 50 ? "#34d399" : v >= 40 ? "#fbbf24" : "#f87171";
                     return (
                       <circle
                         cx={cx}
@@ -414,6 +712,12 @@ function Dashboard({ data }: { data: DashboardData }) {
           </div>
         </div>
       )}
+
+      {/* live pulse */}
+      <LivePulse
+        intervalSec={watchIntervalSec}
+        lastSignalTs={recent_signals[0]?.ts ?? null}
+      />
 
       {/* last 10 signals */}
       <div className="section">
@@ -446,7 +750,7 @@ function Dashboard({ data }: { data: DashboardData }) {
                   </span>
                   <span className="signal-details">
                     <span>
-                      agora{" "}
+                      p(agora){" "}
                       <strong
                         className={
                           e.decision === "exchange_now"
@@ -1023,6 +1327,114 @@ function PhoneConfig({
   );
 }
 
+// ── CLI reference tab ─────────────────────────────────────────────────────────
+
+function CliPanel() {
+  const { copied, copy } = useCopy();
+
+  return (
+    <div>
+      <div className="section">
+        <h2>Referência CLI</h2>
+        <p
+          style={{
+            color: "var(--text-dim)",
+            fontSize: "0.82rem",
+            lineHeight: 1.65,
+            maxWidth: "64ch",
+            marginBottom: "1.5rem",
+          }}
+        >
+          Todos os comandos para rodar o monitor. Clique em{" "}
+          <strong>copiar</strong> para copiar o comando.
+        </p>
+
+        {CLI_SECTIONS.map((section) => (
+          <div key={section.title} className="cli-section">
+            <h2>{section.title}</h2>
+            <p className="cli-desc">{section.desc}</p>
+            <div className="cmd-grid">
+              {section.cmds.map((cmd) => {
+                const id = `${section.title}-${cmd.label}`;
+                return (
+                  <div className="cmd-row" key={id}>
+                    <span className="cmd-label">{cmd.label}</span>
+                    <span className="cmd-code">{cmd.code}</span>
+                    <button
+                      className={`cmd-copy ${copied === id ? "copied" : ""}`}
+                      onClick={() => copy(cmd.code, id)}
+                    >
+                      {copied === id ? "✓ copiado" : "copiar"}
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ))}
+
+        <div className="cli-section">
+          <h2>Flags</h2>
+          <p className="cli-desc">
+            Parâmetros disponíveis para todos os comandos.
+          </p>
+          <dl className="cli-flags">
+            {CLI_FLAGS.map((f) => (
+              <>
+                <dt>{f.flag}</dt>
+                <dd>{f.desc}</dd>
+              </>
+            ))}
+          </dl>
+        </div>
+
+        <div className="cli-section">
+          <h2>API</h2>
+          <p className="cli-desc">
+            O servidor em <code>server.py</code> expõe endpoints REST para
+            integração externa.
+          </p>
+          <div className="cmd-grid">
+            {[
+              {
+                label: "Dashboard",
+                code: "curl http://127.0.0.1:8765/api/dashboard",
+              },
+              {
+                label: "Journal",
+                code: "curl http://127.0.0.1:8765/api/journal",
+              },
+              { label: "State", code: "curl http://127.0.0.1:8765/api/state" },
+              {
+                label: "Thresholds",
+                code: "curl http://127.0.0.1:8765/api/thresholds",
+              },
+              {
+                label: "Health",
+                code: "curl http://127.0.0.1:8765/api/health",
+              },
+            ].map((cmd) => {
+              const id = `api-${cmd.label}`;
+              return (
+                <div className="cmd-row" key={id}>
+                  <span className="cmd-label">{cmd.label}</span>
+                  <span className="cmd-code">{cmd.code}</span>
+                  <button
+                    className={`cmd-copy ${copied === id ? "copied" : ""}`}
+                    onClick={() => copy(cmd.code, id)}
+                  >
+                    {copied === id ? "✓ copiado" : "copiar"}
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── app ──────────────────────────────────────────────────────────────────────
 
 export default function App() {
@@ -1144,6 +1556,13 @@ export default function App() {
     );
   }
 
+  const formatUptime = (seconds: number) => {
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    if (h > 0) return `${h}h ${m}m`;
+    return `${m}m`;
+  };
+
   return (
     <div>
       <header className="header">
@@ -1159,7 +1578,7 @@ export default function App() {
               <StatusDot on={health.healthy} />
               {health.healthy ? "api ok" : "api down"}
               {" · "}
-              {health.uptime_seconds}s uptime
+              {formatUptime(health.uptime_seconds)}
             </div>
           )}
           {journal.length} sinais · {journal.filter((e) => e.notified).length}{" "}
@@ -1181,6 +1600,7 @@ export default function App() {
             ["alerts", "Alertas"],
             ["phone", "Telegram"],
             ["thresholds", "Thresholds"],
+            ["cli", "CLI"],
           ] as [Tab, string][]
         ).map(([t, label]) => (
           <button
@@ -1208,6 +1628,7 @@ export default function App() {
       {tab === "thresholds" && thresholds && (
         <ThresholdsPanel thresholds={thresholds} onSave={saveThresholds} />
       )}
+      {tab === "cli" && <CliPanel />}
 
       {toast && (
         <div className={`toast ${toast.error ? "error" : ""}`}>{toast.msg}</div>
