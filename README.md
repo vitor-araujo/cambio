@@ -8,7 +8,7 @@
   <p align="center">
     <a href="https://github.com/vitor-araujo/cambio/blob/main/LICENSE"><img alt="MIT" src="https://img.shields.io/badge/license-MIT-22c55e?style=flat-square"></a>
     <img alt="Python 3.10+" src="https://img.shields.io/badge/python-3.10+-4B8BBE?style=flat-square&logo=python&logoColor=white">
-    <img alt="versão 0.5.0" src="https://img.shields.io/badge/version-0.5.0-2563eb?style=flat-square">
+    <img alt="versão 0.7.0" src="https://img.shields.io/badge/version-0.7.0-2563eb?style=flat-square">
     <img alt="sem API key" src="https://img.shields.io/badge/dados-grátis%20·%20sem%20API%20key-f59e0b?style=flat-square">
     <img alt="pt · en" src="https://img.shields.io/badge/lang-pt--BR%20·%20en-6366f1?style=flat-square">
   </p>
@@ -28,11 +28,11 @@ A cada ciclo decide **quanto** converter do seu saldo — nunca zero, nunca tudo
 
 ```bash
 pip install yfinance pandas numpy
-python fx_timing.py --watch --notify --phone-alerts   # modo background
-python server.py --dev                                 # dashboard web
+python server.py --dev                                 # dashboard web + coleta ao vivo
+python fx_timing.py --watch --notify --phone-alerts   # modo background alternativo
 ```
 
-Modo background monitora sozinho e dispara alertas HTML + Telegram. O dashboard web mostra charts, thresholds e configuração do bot sem terminal.
+`server.py --dev` agora coleta dados ao vivo e escreve no DB automaticamente — o dashboard sempre mostra sinais frescos. Não precisa rodar `fx_timing.py --watch` separadamente.
 
 ---
 
@@ -42,13 +42,14 @@ Modo background monitora sozinho e dispara alertas HTML + Telegram. O dashboard 
 * ⚖️ **Validador Cost-Matters** — o backtest declara se a vantagem do modelo sobrepassa **2× spread** (margem de segurança Bogle).
 * ⏱️ **Cronômetro de prazo** — o `--watch` mostra quantos dias faltam até a execução forçada.
 * 📊 **Auditoria de comportamento** — `--audit` mostra quantos alertas você ignorou (behavior gap).
-* 🖥️ **Dashboard web** — `python server.py --dev` sobe uma UI React com charts (USD/BRL + p(agora)), últimos 10 sinais, configuração de thresholds e Telegram pelo navegador. Journal em SQLite.
+* 🖥️ **Dashboard web** — `python server.py --dev` sobe UI React com charts (USD/BRL + p(agora)), últimos 10 sinais, configuração de thresholds e Telegram pelo navegador. Coleta dados ao vivo em background — journal em SQLite.
 * 📡 **Dados ao vivo** — PTAX (BCB), AwesomeAPI (intraday), Yahoo (DXY/Brent/VIX), CFTC (COT), SELIC. Zero API keys.
 * 🔄 **Ajuste intraday** — a última cotação substitui a barra do dia no cálculo dos sinais.
 * 🛎️ **Alerta no navegador** — página HTML com cartão de tamanho, prazo restante e link pra Higlobe.
 * 📱 **Alertas no celular** — Telegram por padrão, WhatsApp opcional via Twilio. Configure pelo UI ou `python configure.py`.
 * 👁️ **Modo background** — `--watch` fica rodando, avisa só quando o sinal vira.
 * 📓 **Diário SQLite** — toda decisão em `.fx_journal.db` com `size`, `notified` e `executed`. CSV anterior migrado automaticamente.
+* 🟢 **Coleta ao vivo** — `server.py --dev` ronda o mercado a cada 5 min e escreve no DB — dashboard sempre fresco.
 * 🇧🇷 **Saída em português** — `--lang pt`.
 * 🧪 **Testes de API** — `python test_server.py` valida todos os endpoints.
 
@@ -281,9 +282,18 @@ fx_timing.py [--backtest] [--days DIA ...] [--lang {en,pt}]
 
 Quatro módulos. Cada um com responsabilidade única.
 
+### `server.py` — dashboard web + coleta ao vivo
+
+Sobe API (`:8765`) + Vite dev server + thread de coleta em background:
+
+* API REST: `/api/dashboard`, `/api/journal`, `/api/state`, `/api/thresholds`, `/api/notifier`, `/api/health`
+* Thread de coleta que ronda `_run_live_cycle` a cada N minutos (default 5)
+* Dados sempre frescos no SQLite — sem rodar `fx_timing.py --watch` separado
+* Flags: `--dev` (Vite), `--port`, `--interval` (minutos entre coletas)
+
 ### `fx_timing.py` — orquestrador
 
-Ponto de entrada. Junta tudo:
+Ponto de entrada CLI. Junta tudo:
 
 * parsing de CLI e dispatch (`main`) — inclui `--mark-executed` e `--audit` como subcomandos
 * download dos dados (`fetch`, `fetch_ptax`, `fetch_selic`, `fetch_cot_eur`, `_fetch_live_fx`)
@@ -307,9 +317,9 @@ Compute puro, sem efeitos colaterais. Funções principais:
 * `carry_score` — calibração absoluta do diferencial SELIC−FFR + tendência
 * `build_signals` — agrega tudo em `list[Signal]` + regime score
 
-### `journal.py` — diário de decisões
+### `journal_db.py` — diário de decisões (SQLite)
 
-Append-only CSV (`.fx_journal.csv`). Sem dependências além da stdlib.
+Append-only em `.fx_journal.db` (WAL mode, thread-safe). Migra CSV automaticamente.
 
 * `append(entry)` — adiciona linha
 * `last_entry()` / `last_notified()` / `last_executed()` — acessadores de cauda
@@ -371,11 +381,15 @@ automaticamente.
 ### Início rápido
 
 ```bash
-# UI + API (uma comando):
+# Dashboard com coleta ao vivo (uma comando):
 python server.py --dev
 # → http://localhost:5173
+# Coleta dados a cada 5 min, escreve no DB, serve API + UI
 
-# Monitoramento background:
+# Intervalo customizado (3 min):
+python server.py --dev --interval 3
+
+# Monitoramento background separado (sem UI):
 python fx_timing.py --watch --notify --phone-alerts
 
 # Análise pontual:
@@ -386,7 +400,7 @@ python fx_timing.py --lang pt
 
 | Comando | Descrição |
 |---|---|
-| `python server.py --dev` | Dashboard web (API + Vite) |
+| `python server.py --dev` | Dashboard + coleta ao vivo |
 | `python fx_timing.py --watch --notify --phone-alerts` | Monitoramento completo |
 | `python fx_timing.py` | Análise pontual |
 | `python fx_timing.py --lang pt --notify` | Análise em PT-BR com alerta |
@@ -399,9 +413,17 @@ python fx_timing.py --lang pt
 
 ### Flags
 
+**`server.py`**
+
 | Flag | Padrão | Descrição |
 |---|---|---|
-| `--watch` | — | Loop contínuo |
+| `--dev` | — | Inicia Vite dev server junto com a API |
+| `--port` | 8765 | Porta da API |
+| `--interval` | 5 | Minutos entre coletas de dados |
+
+**`fx_timing.py`**
+
+| Flag | Padrão | Descrição |
 | `--watch-interval` | 5 | Minutos entre checks |
 | `--notify` | — | Abre alerta HTML no navegador |
 | `--phone-alerts` | — | Envia alertas via Telegram |
@@ -530,7 +552,8 @@ Inclua um diff de acurácia do backtest em qualquer PR de sinal.
 * 🛎️ **Browser alerts** (`--notify`) — HTML page with size card, deadline countdown and one-click Higlobe link.
 * 📱 **Phone alerts** (`--phone-alerts`) — ping your phone when USD/BRL rises past your threshold. Telegram by default, WhatsApp via Twilio optional. Setup via `python configure.py`.
 * 👁️ **Background mode** (`--watch`).
-* 📓 **Auto journal** — every call logged to `.fx_journal.csv` with `size`, `notified`, `executed`.
+* 📓 **Auto journal** — every call logged to `.fx_journal.db` (SQLite) with `size`, `notified`, `executed`.
+* 🟢 **Live dashboard** — `python server.py --dev` runs the web UI **and** collects live data in the background. No separate `--watch` loop needed.
 
 ### Installation
 
@@ -543,13 +566,21 @@ python3 -m venv .venv
 ### Usage
 
 ```bash
+# dashboard with live data collection (one command):
+python server.py --dev
+# → http://localhost:5173
+# Collects data every 5 min, writes to DB, serves API + UI
+
+# custom interval (3 min):
+python server.py --dev --interval 3
+
 # one-shot analysis
 .venv/bin/python fx_timing.py
 
-# background with browser alerts
+# background with browser alerts (alternative, no UI)
 .venv/bin/python fx_timing.py --watch --notify
 
-# add phone alerts on rate spikes (Telegram by default, setup once)
+# add phone alerts on rate spikes
 python configure.py
 .venv/bin/python fx_timing.py --watch --notify --phone-alerts
 
@@ -629,9 +660,10 @@ fx_timing.py [--backtest] [--days DAY ...] [--lang {en,pt}]
 
 | Module | Role |
 |---|---|
-| `fx_timing.py` | Entry point — CLI, data fetch, signal pipeline, render, journal, notify, watch loop |
+| `server.py` | Web dashboard + live data collection — runs API and a background watch thread |
+| `fx_timing.py` | CLI, data fetch, signal pipeline, render, journal, notify, watch loop |
 | `signals.py` | Pure signal library — RSI, Bollinger %B, ADX, carry score, `build_signals` |
-| `journal.py` | Append-only CSV log of decisions, last-call summary, notify cooldown |
+| `journal_db.py` | SQLite journal — decisions, last-call summary, notify cooldown |
 | `notify.py` | HTML alert renderer (Fraunces + JetBrains Mono) and browser opener |
 | `notifiers/` | Pluggable messaging backends: `Notifier` Protocol + Telegram + WhatsApp |
 | `rate_alert.py` | Provider-agnostic spike alert (anchor/threshold/cooldown) |

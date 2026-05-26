@@ -14,7 +14,7 @@ from datetime import datetime
 from typing import Optional
 
 ALERT_PATH = ".fx_alert.html"
-HIGLOBE_URL = "https://higlobe.com"
+HIGLOBE_URL = "https://higlobe.com/webapp/en/login"
 
 _TEMPLATE = """<!doctype html>
 <html lang="pt-BR">

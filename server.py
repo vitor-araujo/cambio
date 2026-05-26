@@ -1,8 +1,12 @@
 """
-Cambio monitor server — single command for API + UI.
+Cambio monitor server — API + UI + live data collection.
 
-  python server.py            API only on :8765
-  python server.py --dev      API + Vite dev server (one command)
+  python server.py            API + live watch on :8765
+  python server.py --dev      API + live watch + Vite dev server
+  python server.py --interval 3   Watch every 3 minutes
+
+A background thread fetches live FX data and writes to the DB
+on every cycle, so the dashboard always shows fresh signals.
 
 Endpoints:
   GET  /api/dashboard   — summary stats + last signals
@@ -22,6 +26,7 @@ import os
 import signal
 import subprocess
 import sys
+import threading
 import time
 from http.server import HTTPServer, SimpleHTTPRequestHandler
 from urllib.request import Request, urlopen
@@ -430,11 +435,75 @@ def start_vite(ui_dir: str) -> subprocess.Popen:
     return proc
 
 
+# ── background data collection ──────────────────────────────────────────────
+
+
+def _watch_worker(interval_min: int = 5) -> None:
+    """Background thread: runs a live FX cycle every `interval_min` minutes."""
+    import fx_timing
+
+    args = argparse.Namespace(
+        lang="en",
+        notify=False,
+        phone_alerts=False,
+        alert_threshold=1.0,
+        alert_cooldown=interval_min,
+        alert_provider=None,
+        dca_floor=0.25,
+        dca_ceiling=1.0,
+        deadline_days=15,
+        name="Vitor",
+    )
+
+    # Let the server start first
+    time.sleep(5)
+
+    cycle = 0
+    while True:
+        try:
+            cycle += 1
+            refetch = cycle % 6 == 1  # full refetch ~hourly at 10-min intervals
+            res = fx_timing._run_live_cycle(args, render=False, refetch=refetch)
+            if res.get("ok"):
+                ts = time.strftime("%H:%M")
+                d = res["decision"]
+                pn = res["probs"]["exchange_now"]
+                rate = res["rate_live"] or 0.0
+                sz = res["size"]
+                log.info(
+                    "[%s] %s  p_now=%.2f  size=%.0f%%  R$ %.4f",
+                    ts,
+                    d,
+                    pn,
+                    sz * 100,
+                    rate,
+                )
+            else:
+                log.warning("watch cycle failed — retrying next interval")
+        except Exception as e:
+            log.warning("watch cycle error: %s — retrying", e)
+        time.sleep(interval_min * 60)
+
+
 def main():
     parser = argparse.ArgumentParser(description="Cambio monitor server")
     parser.add_argument("--port", type=int, default=8765, help="API port")
     parser.add_argument("--dev", action="store_true", help="Also start Vite dev server")
+    parser.add_argument(
+        "--watch", action="store_true", help="Enable live data collection loop"
+    )
+    parser.add_argument(
+        "--interval",
+        type=int,
+        default=5,
+        help="Watch loop interval in minutes (default: 5)",
+    )
     args = parser.parse_args()
+
+    # Always run the watch loop — the server needs fresh data
+    watcher = threading.Thread(target=_watch_worker, args=(args.interval,), daemon=True)
+    watcher.start()
+    log.info("watch thread started — interval=%d min", args.interval)
 
     ui_dir = os.path.join(os.path.dirname(__file__), "ui")
     vite_proc = None

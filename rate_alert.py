@@ -159,5 +159,5 @@ def _format_message(rate_now: float, anchor: float, delta_pct: float) -> str:
         f"🇧🇷 cambio · USD/BRL · {ts}\n\n"
         f"R$ {rate_now:.4f}  ({delta_pct:+.2f}% vs R$ {anchor:.4f})\n\n"
         f"Janela de oportunidade — confere o sinal antes de converter.\n"
-        f"https://higlobe.com"
+        f"https://higlobe.com/webapp/en/login"
     )

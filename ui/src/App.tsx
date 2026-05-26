@@ -207,7 +207,7 @@ function Spinner() {
 }
 
 const BROKERS = [
-  { name: "Higlobe", url: "https://app.higlobe.com/login" },
+  { name: "Higlobe", url: "https://higlobe.com/webapp/en/login" },
   { name: "Husky", url: "https://app.husky.com.br/login" },
   { name: "TechFX", url: "https://techfx.com.br/login" },
 ];
@@ -288,21 +288,20 @@ function LivePulse({
   intervalSec: number;
   lastSignalTs: string | null;
 }) {
-  // Anchor = timestamp of the last recorded signal.
-  // Progress = time elapsed since that signal / watch interval.
-  // This means refreshing the page keeps the same ring position —
-  // it's tied to the actual data, not the frontend fetch.
+  // Progress wraps around — once a cycle completes, it restarts.
+  // This prevents the ring from sitting stuck at 0 when the last signal
+  // is older than the watch interval.
   const anchorMs = lastSignalTs ? new Date(lastSignalTs).getTime() : 0;
   const intervalMs = intervalSec * 1000;
   const [progress, setProgress] = useState(() =>
-    anchorMs ? Math.min((Date.now() - anchorMs) / intervalMs, 1) : 0,
+    anchorMs ? ((Date.now() - anchorMs) / intervalMs) % 1 : 0,
   );
 
   useEffect(() => {
     if (!anchorMs) return;
     let rafId: number;
     const tick = () => {
-      setProgress(Math.min((Date.now() - anchorMs) / intervalMs, 1));
+      setProgress(((Date.now() - anchorMs) / intervalMs) % 1);
       rafId = requestAnimationFrame(tick);
     };
     rafId = requestAnimationFrame(tick);
