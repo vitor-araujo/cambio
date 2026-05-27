@@ -4,7 +4,7 @@
 
 <p align="center">
   <h1 align="center">cambio</h1>
-  <p align="center"><em>Timing quantitativo para câmbio USD → BRL.</em></p>
+  <p align="center"><em>Te ajuda a decidir <strong>quando</strong> e <strong>quanto</strong> dólar converter pra real.</em></p>
   <p align="center">
     <a href="https://github.com/vitor-araujo/cambio/blob/main/LICENSE"><img alt="MIT" src="https://img.shields.io/badge/license-MIT-22c55e?style=flat-square"></a>
     <img alt="Python 3.10+" src="https://img.shields.io/badge/python-3.10+-4B8BBE?style=flat-square&logo=python&logoColor=white">
@@ -16,50 +16,39 @@
 
 ---
 
-### O que é
+## O que é
 
-Modelo probabilístico open-source que analisa 12 sinais quantitativos (momentum, RSI, carry, COT, etc.) sobre dados públicos de mercado pra responder **se é hora de converter USD → BRL**.
+O cambio é um programa que olha o mercado financeiro e calcula: **é melhor trocar dólar por real agora ou esperar?**
 
-### O que faz
+Ele pega 12 indicadores (dólar, RSI, Bollinger, carry, COT, etc.) e calcula uma probabilidade. Se a chance de "trocar agora" for alta, ele te avisa. Tudo com dados públicos e gratuitos — não precisa de API key.
 
-A cada ciclo decide **quanto** converter do seu saldo — nunca zero, nunca tudo — usando disciplina Vanguard-DCA com floor e ceiling configuráveis. Se a convicção for alta, abre um alerta no navegador com o cartão de tamanho sugerido e o link direto pra corretora.
+## Pra que serve
 
-### Como usar
+Se você recebe dólar (freelancer, remessa, salário em USD), precisa decidir quando converter. O cambio te diz:
+
+- **Quando:** a probabilidade de "trocar agora" vs "esperar"
+- **Quanto:** uma fração entre 25% e 100% do saldo — nunca zero, nunca tudo (disciplina Vanguard-DCA)
+
+Ele nunca diz "compre" ou "venda". Diz: "dada a probabilidade, faz sentido converter X% agora."
+
+## Como usar
+
+Um comando só — dashboard + coleta de dados ao vivo:
 
 ```bash
 pip install yfinance pandas numpy
-python server.py --dev                                 # dashboard web + coleta ao vivo
-python fx_timing.py --watch --notify --phone-alerts   # modo background alternativo
+python server.py --dev
 ```
 
-`server.py --dev` agora coleta dados ao vivo e escreve no DB automaticamente — o dashboard sempre mostra sinais frescos. Não precisa rodar `fx_timing.py --watch` separadamente.
+Abre em **http://localhost:5173**. Pronto. O programa vai buscar dados do mercado a cada 5 minutos e mostrar tudo no dashboard:
 
----
+- Cotação ao vivo (dólar/real)
+- Probabilidade de "trocar agora" vs "esperar"
+- Últimos sinais com gráfico
+- Botão pra abrir a corretora (Higlobe, Husky, TechFX)
+- Cronômetro mostrando quando é a próxima coleta
 
-## Recursos
-
-* 🎯 **Sizing Vanguard-DCA** — cada ciclo converte uma fração entre `--dca-floor` (25 %) e `--dca-ceiling` (75 %), proporcional à convicção. Nunca zero, nunca tudo.
-* ⚖️ **Validador Cost-Matters** — o backtest declara se a vantagem do modelo sobrepassa **2× spread** (margem de segurança Bogle).
-* ⏱️ **Cronômetro de prazo** — o `--watch` mostra quantos dias faltam até a execução forçada.
-* 📊 **Auditoria de comportamento** — `--audit` mostra quantos alertas você ignorou (behavior gap).
-* 🖥️ **Dashboard web** — `python server.py --dev` sobe UI React com charts (USD/BRL + p(agora)), últimos 10 sinais, configuração de thresholds e Telegram pelo navegador. Coleta dados ao vivo em background — journal em SQLite.
-* 📡 **Dados ao vivo** — PTAX (BCB), AwesomeAPI (intraday), Yahoo (DXY/Brent/VIX), CFTC (COT), SELIC. Zero API keys.
-* 🔄 **Ajuste intraday** — a última cotação substitui a barra do dia no cálculo dos sinais.
-* 🛎️ **Alerta no navegador** — página HTML com cartão de tamanho, prazo restante e link pra Higlobe.
-* 📱 **Alertas no celular** — Telegram por padrão, WhatsApp opcional via Twilio. Configure pelo UI ou `python configure.py`.
-* 👁️ **Modo background** — `--watch` fica rodando, avisa só quando o sinal vira.
-* 📓 **Diário SQLite** — toda decisão em `.fx_journal.db` com `size`, `notified` e `executed`. CSV anterior migrado automaticamente.
-* 🟢 **Coleta ao vivo** — `server.py --dev` ronda o mercado a cada 5 min e escreve no DB — dashboard sempre fresco.
-* 🇧🇷 **Saída em português** — `--lang pt`.
-* 🧪 **Testes de API** — `python test_server.py` valida todos os endpoints.
-
----
-
-## Requisitos
-
-* Python **3.10+**
-* `yfinance`, `pandas`, `numpy`
-* Conexão com a internet (os dados são buscados em tempo real)
+Se quiser trocar a corretora, clique no botão e escolha. Se quiser alerta no celular (Telegram), configure pela aba Telegram no dashboard.
 
 ---
 
@@ -75,454 +64,249 @@ python3 -m venv .venv
 
 ---
 
-## Uso
+## O que o programa faz
 
-### Análise pontual
+### 🎯 Sizing Vanguard-DCA
 
-```bash
-.venv/bin/python fx_timing.py --lang pt
-```
+A cada ciclo, ele calcula uma fração entre **25%** (piso) e **100%** (teto) do saldo. Se a probabilidade de "agora" é alta, converte mais. Se é baixa, converte menos. Mas sempre converte pelo menos 25% — assim você não fica paralisado esperando o "momento perfeito" que nunca vem.
 
-```
-══════════════════════════════════════════════════════════════════
-  USD → BRL   MODELO DE TIMING DE CÂMBIO
-  2025-06-02   ·   R$ 5.7208
-══════════════════════════════════════════════════════════════════
+### 📡 Dados ao vivo (de graça)
 
-  Regime de Tendência:  sem tendência clara
+Busca automaticamente de 5 fontes:
 
-  SINAIS                        ← AGUARDAR  AGORA →   score    peso
-  ────────────────────────────────────────────────────────────────
-  DXY                |                |  -0.12  11%  [AGU.]
-  Brent              |        ▶▶▶     |  +0.41   6%  [AGORA]
-  VALE               |        ▶▶▶     |  +0.50   5%  [AGORA]
-  VIX                |                |  -0.08   9%  [NEUT]
-  IBOV               |        ▶▶▶     |  +0.44   7%  [AGORA]
-  Carry              |    ◀◀◀         |  -0.52   5%  [AGU.]
-  USD/BRL Level      |  ◀◀◀           |  -0.40  10%  [AGU.]
-  RSI(14)            |        ▶▶▶▶    |  +0.55  12%  [AGORA]
-  Bollinger %B       |        ▶▶▶▶    |  +0.64   9%  [AGORA]
-  USD/BRL Trend      |                |  +0.06   9%  [NEUT]
-  BRL Futures (6L)   |        ▶       |  +0.18   8%  [AGORA]
-  COT USD            |                |  +0.03   9%  [NEUT]
-
-  DISTRIBUIÇÃO DE PROBABILIDADE
-  Câmbio Agora   58.2%  [████████████████████░░░░░░░░░░░░░░]
-  Dividir 50/50  12.9%  [████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░]
-  Aguardar       28.9%  [██████████░░░░░░░░░░░░░░░░░░░░░░░░]
-
-  ◈  os sinais indicam uma possível oportunidade de câmbio agora
-══════════════════════════════════════════════════════════════════
-```
-
-### Modo background
-
-Deixe rodando em uma aba do terminal — alerta automático quando a convicção subir:
-
-```bash
-.venv/bin/python fx_timing.py --lang pt --watch --notify
-```
-
-Cada ciclo imprime tamanho sugerido + dias até prazo:
-
-```
-[14:32] wait          p_now=0.31  size=25%  R$ 5.0810  prazo=11d  ·
-[15:32] exchange_now  p_now=0.62  size=81%  R$ 5.1340  prazo=10d  ◈ ALERT
-```
-
-### Alertas no celular (`--phone-alerts`)
-
-Receba uma mensagem sempre que o USD/BRL subir além do limite. Provedor padrão: **Telegram** (grátis, ilimitado, oficial). WhatsApp via Twilio disponível como opção.
-
-```bash
-python configure.py                       # CLI interativa (escolhe o provedor)
-python configure.py --provider telegram   # pula a pergunta de provedor
-python configure.py --test                # envia mensagem de teste
-python configure.py --reset               # zera âncora e cooldown
-```
-
-O CLI cria um `.env` local (modo 600, no `.gitignore` — nunca vai pro repo). Depois é só rodar com `--phone-alerts`:
-
-```bash
-.venv/bin/python fx_timing.py --lang pt --watch --notify --phone-alerts
-```
-
-#### Setup Telegram (2 min, grátis)
-
-1. No Telegram, abra a conversa com `@BotFather`
-2. Envie `/newbot` → nome qualquer → username terminando em `bot`
-3. O BotFather te dá um **token** (`1234567890:AAH...`)
-4. Rode `python configure.py`, cole o token, mande qualquer mensagem pro bot quando pedido
-5. O CLI descobre seu **chat_id** automaticamente via `getUpdates`
-6. Aceita o teste — chega uma mensagem na hora
-
-O `.env` fica assim:
-
-```env
-NOTIFIER_PROVIDER=telegram
-TELEGRAM_BOT_TOKEN=1234567890:AAH...
-TELEGRAM_CHAT_ID=123456789
-FX_ALERT_THRESHOLD_PCT=1.0
-FX_ALERT_COOLDOWN_MIN=5
-```
-
-#### Setup WhatsApp (opcional, via Twilio)
-
-WhatsApp Cloud API direto da Meta exige uma conta business com verificação que atualmente bloqueia muitos devs solo sem CNPJ. O caminho viável é Twilio:
-
-1. Conta em [twilio.com/try-twilio](https://www.twilio.com/try-twilio)
-2. **Messaging → Try it out → Send a WhatsApp message** → ativa o sandbox
-3. Do seu WhatsApp, manda `join <duas-palavras>` para `+1 415 523 8886`
-4. Pega **Account SID** e **Auth Token** no console
-5. Rode `python configure.py --provider whatsapp` e cole os valores
-
-#### Como funciona a âncora
-
-No primeiro tick, o preço atual vira âncora. Cada novo tick é comparado contra ela. Se cair, a âncora desce junto (rastreia a mínima local). Se subir além do `threshold` e o cooldown já expirou, dispara o alerta e a âncora se move pro preço atual — o próximo alerta exige outra alta de `+threshold` da nova base.
-
-Estado fica em `.fx_alert.state` (gitignored) e sobrevive a restarts. Use `--reset` após um câmbio manual.
-
-### Marcar câmbio executado
-
-Depois que você fecha o câmbio na corretora, ancora o cronômetro de prazo:
-
-```bash
-.venv/bin/python fx_timing.py --mark-executed
-```
-
-### Auditoria do comportamento
-
-Quantos alertas você ignorou? (a *behavior gap* que destrói mais valor que más previsões)
-
-```bash
-.venv/bin/python fx_timing.py --audit 30
-```
-
-### Backtest realista
-
-```bash
-.venv/bin/python fx_timing.py --backtest --days 5 20 --deadline-days 15 --spread-bps 50
-```
-
-Walk-forward desde 2022, sem look-ahead, no *seu* calendário de recebimentos.
-
----
-
-## Sinais
-
-Doze sinais em três famílias. Pesos somam 100 %.
-
-| Família | Sinal | Peso | Lógica |
-|---|---|---|---|
-| **Momentum** | DXY | 11 % | sobe → dólar forte → aguardar |
-| | Brent | 6 % | sobe → boost de commodities → agora |
-| | VALE | 5 % | sobe → balança comercial → agora |
-| | VIX | 9 % | alto + subindo → risk-off → aguardar |
-| | IBOV | 7 % | sobe → otimismo Brasil → agora |
-| **Carry** | SELIC − FFR | 5 % | diferencial alto → BRL atrativo → aguardar |
-| **Reversão** | USD/BRL Level | 10 % | percentil multi-anual alto → agora |
-| | RSI(14) | 12 % | >70 sobrecomprado → agora · <30 → aguardar |
-| | Bollinger %B | 9 % | banda superior → agora · inferior → aguardar |
-| | USD/BRL Trend | 9 % | inclinação MA 30d → reversão de tendência |
-| **Posicionamento** | BRL Futures (6L) | 8 % | momentum dos futuros CME — fluxo institucional |
-| | COT USD | 9 % | net position EUR/USD — sentimento de hedge funds |
-
-**Filtro de regime:** o ADX(14) detecta tendência forte e reduz o peso dos sinais de reversão (RSI, Bollinger, Level) em até 70 % — para evitar chamar reversão contra um momentum em andamento.
-
----
-
-## Backtest
-
-Oracle = taxa no **próximo dia de checagem agendado** (não preço intraday teórico).
-
-| Calendário | AGORA | AGUARDAR | Decisões |
-|---|---|---|---|
-| Dias 2 e 17 (padrão) | 58,3 % | 44,4 % | 102 |
-| Dias 5 e 20 | **75,0 %** | 42,2 % | 103 |
-
-**A acurácia varia com o calendário.** Sempre rode no seu antes de confiar.
-
----
-
-## Referência da CLI
-
-```
-fx_timing.py [--backtest] [--days DIA ...] [--lang {en,pt}]
-             [--deadline-days N] [--spread-bps BPS]
-             [--dca-floor FRAC] [--dca-ceiling FRAC]
-             [--notify] [--watch] [--watch-interval MIN] [--name NOME]
-             [--phone-alerts] [--alert-provider {telegram,whatsapp}]
-             [--alert-threshold PCT] [--alert-cooldown MIN]
-             [--mark-executed] [--audit [DAYS]]
-```
-
-| Flag | Padrão | Descrição |
-|---|---|---|
-| `--backtest` | — | Roda walk-forward desde 2022 |
-| `--days` | `2 17` | Dia(s) do mês em que você decide |
-| `--lang` | `en` | Idioma da saída (`en` ou `pt`) |
-| `--deadline-days` | `15` | Prazo limite em dias para forçar execução |
-| `--spread-bps` | `50` | Spread efetivo da corretora em basis points |
-| `--dca-floor` | `0.25` | Fração mínima a converter a cada ciclo (Vanguard-DCA) |
-| `--dca-ceiling` | `1.00` | Fração máxima quando a convicção é alta |
-| `--notify` | — | Abre alerta HTML no navegador em flip-to-AGORA |
-| `--watch` | — | Modo background — re-roda em loop |
-| `--watch-interval` | `5` | Minutos entre checagens em `--watch` |
-| `--name` | `Vitor` | Nome no cabeçalho do alerta no navegador |
-| `--phone-alerts` | — | Habilita alertas no celular (Telegram/WhatsApp) |
-| `--alert-provider` | `telegram` | Provedor: `telegram` ou `whatsapp` (override do `.env`) |
-| `--alert-threshold` | `1.0` | % de alta vs âncora que dispara o alerta |
-| `--alert-cooldown` | = `--watch-interval` | Minutos mínimos entre alertas (casa com a interval por padrão) |
-| `--mark-executed` | — | Marca última entrada do diário como executada (ancora o cronômetro) |
-| `--audit` | `30` | Imprime auditoria de *behavior gap* dos últimos N dias |
-
----
-
-## Estrutura do projeto
-
-Quatro módulos. Cada um com responsabilidade única.
-
-### `server.py` — dashboard web + coleta ao vivo
-
-Sobe API (`:8765`) + Vite dev server + thread de coleta em background:
-
-* API REST: `/api/dashboard`, `/api/journal`, `/api/state`, `/api/thresholds`, `/api/notifier`, `/api/health`
-* Thread de coleta que ronda `_run_live_cycle` a cada N minutos (default 5)
-* Dados sempre frescos no SQLite — sem rodar `fx_timing.py --watch` separado
-* Flags: `--dev` (Vite), `--port`, `--interval` (minutos entre coletas)
-
-### `fx_timing.py` — orquestrador
-
-Ponto de entrada CLI. Junta tudo:
-
-* parsing de CLI e dispatch (`main`) — inclui `--mark-executed` e `--audit` como subcomandos
-* download dos dados (`fetch`, `fetch_ptax`, `fetch_selic`, `fetch_cot_eur`, `_fetch_live_fx`)
-* aplicação do tick intraday (`_apply_intraday`)
-* probabilidades e regime (`probabilities`, `apply_regime`)
-* **sizing Vanguard-DCA** (`size`, `decide`) — fração de conversão ancorada em piso/teto
-* renderização do terminal (`render_live`, `render_backtest`) — inclui seção Cost-Matters Hypothesis
-* simulação de conversões parciais (`run_backtest`, `sequential_sim`) com `size_frac` por checkpoint
-* loop background (`_run_live_cycle`, `_watch_loop`) — mostra cronômetro de prazo a cada ciclo
-* integração com journal e notify
-
-### `signals.py` — biblioteca de sinais
-
-Compute puro, sem efeitos colaterais. Funções principais:
-
-* `z_momentum` — spread de MAs normalizado por σ, clipado em [-1, 1]
-* `_rsi_value` / `rsi_score` — Wilder RSI(14) e mapeamento para score
-* `_pct_b` / `bb_score` — Bollinger %B e mapeamento para score
-* `compute_adx` — Wilder ADX(14) com DI±
-* `regime_from_adx` — converte ADX em regime de tendência ∈ [-1, 1]
-* `carry_score` — calibração absoluta do diferencial SELIC−FFR + tendência
-* `build_signals` — agrega tudo em `list[Signal]` + regime score
-
-### `journal_db.py` — diário de decisões (SQLite)
-
-Append-only em `.fx_journal.db` (WAL mode, thread-safe). Migra CSV automaticamente.
-
-* `append(entry)` — adiciona linha
-* `last_entry()` / `last_notified()` / `last_executed()` — acessadores de cauda
-* `mark_executed(when=None)` — flipa `executed=True` na entrada (mais recente ou pelo timestamp)
-* `render_summary(prev, cur_rate)` — linha "último sinal há Xh: WAIT @ R$ 5.08 → agora R$ 5.13 (+1.04 %) ✓"
-* `should_notify(decision, p_now)` — aplica threshold + cooldown de 6 h
-* `days_until_deadline(deadline_days)` — dias restantes ancorados na última execução
-* `audit_summary(days)` — alertas vs execuções vs taxa de override (a *behavior gap* de Morningstar)
-
-### `notify.py` — alerta HTML
-
-Renderiza `.fx_alert.html` e abre no navegador padrão.
-
-* Tipografia: **Fraunces** (serif) no headline, **JetBrains Mono** nos números
-* Paleta: verde-floresta + âmbar (Brasil), gradientes em camadas, grid sutil
-* Animações CSS-only — fade-in escalonado, pulse no CTA
-* `render_alert(...)` — escreve o HTML
-* `open_in_browser(path)` — abre via `webbrowser.open`
-* `alert(...)` — atalho que faz os dois
-
-### `notifiers/` — backends de mensageria (pluggable)
-
-Arquitetura SOLID: um Protocol pequeno + uma fábrica. Adicionar provedor novo é escrever um arquivo e registrar no `__init__.py` — nada mais muda no projeto.
-
-* `notifiers/base.py` — Protocol `Notifier` com `send`, `is_configured`, `missing_keys`
-* `notifiers/telegram.py` — `TelegramNotifier` + `discover_chat_id` (auto-detecção via `getUpdates`)
-* `notifiers/whatsapp.py` — `WhatsAppNotifier` (Twilio) — mantido pro dia que WhatsApp ficar viável
-* `notifiers/__init__.py` — `get_notifier(provider)` + registry
-
-### `rate_alert.py` — disparador de alertas (provider-agnostic)
-
-Depende apenas do Protocol `Notifier`, não de classes concretas (DIP).
-
-* `load_env(path)` — popula `os.environ` a partir do `.env`
-* `maybe_alert_on_rise(rate, *, notifier, ...)` — âncora + threshold + cooldown
-* `reset_state()` — limpa `.fx_alert.state`
-
-### `configure.py` — setup CLI
-
-CLI interativa que gera o `.env` (modo 600, gitignored).
-
-* Pergunta o provedor primeiro (Telegram default, WhatsApp opcional)
-* Telegram: auto-descobre o `chat_id` via `getUpdates` após o usuário mandar uma msg pro bot
-* WhatsApp: pede telefone, SID, token (com `getpass`)
-* `--test` envia mensagem, `--reset` limpa âncora, `--provider` pula a pergunta
-* Nada sensível **nunca** entra no repositório
-
----
-
-## Monitoramento UI
-
-Dashboard web com charts (p(agora) + USD/BRL), últimos 10 sinais, configuração
-de thresholds e Telegram pelo navegador. A aba **CLI** lista todos os comandos
-prontos para copiar.
-
-O journal usa **SQLite** (`.fx_journal.db`). O CSV anterior é migrado
-automaticamente.
-
-### Início rápido
-
-```bash
-# Dashboard com coleta ao vivo (uma comando):
-python server.py --dev
-# → http://localhost:5173
-# Coleta dados a cada 5 min, escreve no DB, serve API + UI
-
-# Intervalo customizado (3 min):
-python server.py --dev --interval 3
-
-# Monitoramento background separado (sem UI):
-python fx_timing.py --watch --notify --phone-alerts
-
-# Análise pontual:
-python fx_timing.py --lang pt
-```
-
-### Comandos essenciais
-
-| Comando | Descrição |
+| Fonte | O que traz |
 |---|---|
-| `python server.py --dev` | Dashboard + coleta ao vivo |
-| `python fx_timing.py --watch --notify --phone-alerts` | Monitoramento completo |
-| `python fx_timing.py` | Análise pontual |
-| `python fx_timing.py --lang pt --notify` | Análise em PT-BR com alerta |
-| `python configure.py` | Setup Telegram (interativo) |
-| `python fx_timing.py --show-journal` | Últimos 20 sinais |
-| `python fx_timing.py --audit` | Auditoria 30 dias |
-| `python fx_timing.py --backtest` | Walk-forward backtest |
-| `python fx_timing.py --mark-executed` | Marca câmbio como executado |
-| `curl http://127.0.0.1:8765/api/health` | Health check API |
+| BCB PTAX | Taxa oficial do dólar comercial |
+| AwesomeAPI | Cotação ao vivo (atualiza a cada 30s) |
+| Yahoo Finance | DXY, Brent, VIX, IBOV, VALE |
+| CFTC COT | Posicionamento de hedge funds em dólar |
+| BCB SELIC | Taxa básica brasileira + T-bill americano (carry) |
 
-### Flags
+### 🖥️ Dashboard web
 
-**`server.py`**
+Rodando `python server.py --dev`, ele sobe um site com tudo na tela: gráfico do dólar e da probabilidade, últimos sinais, config de Telegram, thresholds — tudo clicável, sem precisar de terminal.
 
-| Flag | Padrão | Descrição |
+A coleta de dados roda em background. Toda vez que o programa busca novos dados, o SQLite atualiza sozinho. Você pode mudar o intervalo de coleta pela interface (Na aba Thresholds, mude `watch_interval_min`).
+
+### 🔄 Coleta automática
+
+O `server.py` roda uma thread em background que coleta dados do mercado a cada N minutos (padrão 5). Mudou o intervalo na interface? O programa detecta em até 10 segundos e ajusta.
+
+```bash
+python server.py --dev                        # dashboard + coleta a cada 5 min
+python server.py --dev --interval 1           # coleta a cada 1 min
+```
+
+### 🛎️ Alerta no navegador
+
+Se a probabilidade de "trocar agora" for alta, abre uma página no navegador com:
+
+- Quanto converter (ex: "51% do saldo")
+- Prazo restante (ex: "faltam 11 dias pra execução forçada")
+- Link direto pra corretora (Higlobe)
+
+### 📱 Alerta no celular (Telegram)
+
+Quando o dólar sobe mais que um limite que você define, manda mensagem no Telegram. Setup rápido:
+
+```bash
+python configure.py          # configura o bot (2 min, grátis)
+python configure.py --test   # manda mensagem de teste
+```
+
+O alerta usa uma "âncora" — o preço vira referência. Se cair, a âncora desce. Se subir além do limite, dispara. Depois a âncora sobe pro novo preço, e você só recebe outro alerta se subir de novo acima do limite.
+
+### 📓 Diário de decisões
+
+Toda vez que o programa roda, ele anota numa base SQLite (`.fx_journal.db`):
+
+- Quando rodou
+- Qual era a cotação
+- Qual a decisão (agora / esperar / dividir)
+- Qual a probabilidade
+- Se você foi alertado
+- Se você marcou como executado
+
+Depois de converter o dólar, você marca:
+
+```bash
+python fx_timing.py --mark-executed
+```
+
+Isso ancora o cronômetro — se você tem 15 dias pra converter, agora o programa sabe quando começou a contagem.
+
+### 📊 Auditoria de comportamento
+
+O pior inimigo do investidor não é o mercado — é ele mesmo. O comando `--audit` mostra:
+
+- Quantos alertas o modelo disparou
+- Quantos você seguiu
+- Quantos você ignorou
+- Sua taxa de "override" (quanto você desobedeceu o próprio modelo)
+
+```bash
+python fx_timing.py --audit 30   # últimos 30 dias
+```
+
+---
+
+## Sinais que o programa usa
+
+São 12 sinais em 4 famílias. Cada um tem um peso (que soma 100%) e um score (positivo = "agora", negativo = "esperar"):
+
+| Família | Sinal | Peso | Lógica simples |
+|---|---|---|---|
+| **Momentum** | DXY (índice dólar) | 11% | dólar forte → esperar |
+| | Petróleo Brent | 6% | sobe → commodities sobem → trocar agora |
+| | VALE (ações) | 5% | sobe → balança comercial favorável → agora |
+| | VIX (medo) | 9% | alto → risco → esperar |
+| | IBOV (Bovespa) | 7% | sobe → otimismo Brasil → agora |
+| **Carry** | SELIC − FFR | 5% | juros brasileiros altos → BRL atrativo → esperar |
+| **Reversão** | Nível do dólar | 10% | percentil alto (caro) → pode cair → agora |
+| | RSI(14) | 12% | acima de 70 (sobrecomprado) → agora |
+| | Bollinger %B | 9% | banda superior → agora · inferior → esperar |
+| | Tendência USD/BRL | 9% | inclinação da média de 30 dias |
+| **Posicionamento** | Futuros BRL (CME) | 8% | fluxo institucional |
+| | COT USD (CFTC) | 9% | sentimento de hedge funds |
+
+**Filtro de regime:** o ADX(14) detecta se tem tendência forte. Se tem, reduz o peso dos sinais de reversão em até 70% — pra não chamar "reversão" contra um momento que está forte.
+
+---
+
+## Backtest (resultados históricos)
+
+O programa simula o que teria acontecido se você usasse o modelo desde 2022:
+
+| Calendário | Acertou "agora" | Acertou "esperar" | Total de decisões |
+|---|---|---|---|
+| Dias 2 e 17 | 58% | 44% | 102 |
+| Dias 5 e 20 | **75%** | 42% | 103 |
+
+Esses números mudam conforme o calendário. Rode o backtest no seu calendário antes de confiar:
+
+```bash
+python fx_timing.py --backtest --days 5 20   # dias 5 e 20 de cada mês
+```
+
+---
+
+## Referência rápida
+
+### `server.py` (dashboard + coleta ao vivo)
+
+| Flag | Padrão | O que faz |
 |---|---|---|
-| `--dev` | — | Inicia Vite dev server junto com a API |
+| `--dev` | — | Sobreo site + Vite (recomendado) |
 | `--port` | 8765 | Porta da API |
 | `--interval` | 5 | Minutos entre coletas de dados |
 
-**`fx_timing.py`**
+### `fx_timing.py` (linha de comando)
 
-| Flag | Padrão | Descrição |
-| `--watch-interval` | 5 | Minutos entre checks |
-| `--notify` | — | Abre alerta HTML no navegador |
-| `--phone-alerts` | — | Envia alertas via Telegram |
-| `--alert-threshold` | 1.0 | % de alta vs âncora para alertar |
-| `--alert-cooldown` | = watch-interval | Minutos entre alertas |
-| `--dca-floor` | 0.25 | Fração mínima por conversão |
-| `--dca-ceiling` | 0.75 | Fração máxima por conversão |
-| `--spread-bps` | 50 | Spread em basis points |
-| `--deadline-days` | 15 | Prazo máximo em dias |
-| `--lang` | en | Idioma (`en` / `pt`) |
-| `--mark-executed` | — | Marca último sinal como executado |
-| `--show-journal` | — | Mostra últimos N sinais (padrão 20) |
-| `--audit` | — | Auditoria dos últimos N dias (padrão 30) |
-| `--backtest` | — | Walk-forward backtest |
-| `--days` | 2 17 | Dia(s) do mês para backtest |
-
-### Telegram pelo UI
-
-Na aba **Telegram** configure o bot sem terminal:
-
-1. Crie um bot com @BotFather
-2. Cole o token
-3. Mande qualquer mensagem pro bot
-4. Clique **Testar envio** — o chat_id é descoberto automaticamente
-
-A configuração é salva no `.env` (já no .gitignore).
-
-### API
-
-Todos os endpoints estão disponíveis em `http://127.0.0.1:8765/api/`:
-
-| Endpoint | Método | Descrição |
+| Flag | Padrão | O que faz |
 |---|---|---|
-| `/dashboard` | GET | Resumo + últimos sinais |
-| `/journal` | GET | Journal completo |
-| `/state` | GET | Estado do alerta (âncora, cooldown) |
-| `/thresholds` | GET | Thresholds atuais |
-| `/thresholds` | POST | Atualiza thresholds |
-| `/notifier` | GET | Status configuração Telegram |
-| `/notifier` | POST | Salva configuração Telegram |
-| `/notifier/test` | POST | Envia mensagem de teste |
-| `/health` | GET | Health check |
+| `--lang pt` | en | Mostra tudo em português |
+| `--watch` | — | Roda em loop (background) |
+| `--watch-interval 5` | 5 | Minutos entre checks |
+| `--notify` | — | Abre alerta no navegador quando probabilidade é alta |
+| `--phone-alerts` | — | Manda mensagem no Telegram/celular |
+| `--dca-floor 0.25` | 0.25 | Fração mínima que converte (25%) |
+| `--dca-ceiling 0.75` | 0.75 | Fração máxima que converte (75%) |
+| `--deadline-days 15` | 15 | Prazo máximo em dias |
+| `--mark-executed` | — | Marca que você fez o câmbio (para o cronômetro) |
+| `--audit 30` | 30 | Mostra auditoria dos últimos N dias |
+| `--backtest` | — | Roda simulação desde 2022 |
+| `--days 2 17` | 2 17 | Dias do mês que você costuma receber |
 
-### Testes
+### `configure.py` (setup do Telegram)
+
+```bash
+python configure.py          # interativo
+python configure.py --test   # manda mensagem de teste
+python configure.py --reset  # zera âncora e cooldown
+```
+
+---
+
+## Thresholds (configuráveis pela interface)
+
+Esses valores você pode alterar no dashboard (aba Thresholds) ou pela API:
+
+| Nome | Padrão | O que significa |
+|---|---|---|
+| `watch_interval_min` | 5 | A cada quantos minutos o programa busca dados novos |
+| `notify_threshold` | 0.40 | Probabilidade mínima pra abrir alerta no navegador (40%) |
+| `notify_cooldown_hours` | 6 | Horas mínimas entre alertas no navegador |
+| `alert_threshold_pct` | 1.0 | % de alta do dólar pra mandar alerta no Telegram |
+| `alert_cooldown_min` | 5 | Minutos mínimos entre alertas no Telegram |
+| `dca_floor` | 0.25 | Fração mínima que converte por ciclo (25%) |
+| `dca_ceiling` | 0.75 | Fração máxima que converte por ciclo (75%) |
+| `spread_bps` | 50 | Spread da corretora em basis points (0.50%) |
+| `deadline_days` | 15 | Dias até forçar a conversão |
+
+Mudou `watch_interval_min` pra 1? O programa detecta em até 10 segundos e começa a coletar a cada minuto.
+
+---
+
+## API
+
+Todos os endpoints em `http://127.0.0.1:8765/api/`:
+
+| Endpoint | Método | O que retorna |
+|---|---|---|
+| `/dashboard` | GET | Resumo geral + últimos sinais |
+| `/journal` | GET | Todas as entradas do diário |
+| `/state` | GET | Estado do alerta (âncora, cooldown) |
+| `/thresholds` | GET | Valores atuais dos thresholds |
+| `/thresholds` | POST | Atualiza thresholds |
+| `/notifier` | GET | Status do Telegram (configurado?) |
+| `/notifier` | POST | Salva configuração do Telegram |
+| `/notifier/test` | POST | Envia mensagem de teste |
+| `/health` | GET | Health check (tá tudo funcionando?) |
+
+---
+
+## Testes
 
 ```bash
 python server.py &           # inicia o servidor
 python test_server.py         # roda todos os testes de API
 ```
 
-### Thresholds configuráveis (via UI ou API)
+---
 
-| Threshold | Padrão | Descrição |
-|---|---|---|
-| `watch_interval_min` | 5 | Minutos entre checks |
-| `notify_threshold` | 0.40 | p(agora) mínimo para alerta HTML |
-| `notify_cooldown_hours` | 6 | Horas entre alertas HTML |
-| `alert_threshold_pct` | 1.0 | % de alta vs âncora para Telegram |
-| `alert_cooldown_min` | 5 | Minutos entre alertas Telegram |
-| `dca_floor` | 0.25 | Fração mínima Vanguard-DCA |
-| `dca_ceiling` | 0.75 | Fração máxima Vanguard-DCA |
-| `spread_bps` | 50 | Spread efetivo em basis points |
-| `deadline_days` | 15 | Dias até execução forçada |
+## Estrutura do projeto
 
-## Diário e alertas
+Cada arquivo tem uma responsabilidade clara:
 
-A cada execução o cambio adiciona uma linha no CSV local:
-
-```csv
-ts,rate_signal,rate_live,decision,p_now,p_split,p_wait,composite,agreement,regime,notified
-2025-06-02T14:32:00,5.0810,5.0825,wait,0.31,0.18,0.51,-0.18,0.62,+0.05,0
-```
-
-Na próxima execução, aparece no topo:
-
-```
-último sinal há 6h: WAIT @ R$ 5.0810  →  agora R$ 5.1340  (+1.04 %) ✓
-```
-
-Quando `--notify` está ativo e `p_now ≥ 0.40` (calibrado a partir de 2 meses de uso), abre `.fx_alert.html` no navegador. Cooldown de 6 horas evita spam. Os dois arquivos ficam locais — não vão pro Git.
+| Arquivo | O que faz |
+|---|---|
+| `server.py` | Dashboard web + API + thread de coleta ao vivo |
+| `fx_timing.py` | Linha de comando: busca dados, calcula sinais, mostra resultado |
+| `signals.py` | Biblioteca de sinais (RSI, Bollinger, ADX, carry, etc.) |
+| `journal_db.py` | Diário em SQLite — grava cada decisão, consulta última, faz auditoria |
+| `notify.py` | Gera o alerta HTML bonitão e abre no navegador |
+| `notifiers/` | Sistema de mensageria (Telegram e WhatsApp) — fácil adicionar novos |
+| `rate_alert.py` | Dispara alerta quando o dólar sobe além do limite |
+| `configure.py` | Setup interativo do Telegram |
 
 ---
 
-## Guia completo para leigos 🇧🇷
+## Guia para quem nunca usou terminal
 
-Nunca usou terminal? Veja o [guia passo-a-passo](docs/GUIDE-PT.md) — instalação do Python, primeiro câmbio, modo background, diário, backtest. Zero conhecimento prévio assumido.
+Nunca usou terminal? Tem um [guia passo-a-passo](docs/GUIDE-PT.md) que mostra desde instalar o Python até receber alertas no celular. Zero conhecimento prévio.
 
-> **Quick links:** [instalar Python](docs/GUIDE-PT.md#passo-1) · [primeiro uso](docs/GUIDE-PT.md#passo-5) · [alerta no navegador](docs/GUIDE-PT.md#passo-6) · [modo background](docs/GUIDE-PT.md#passo-7) · [troubleshooting](docs/GUIDE-PT.md#troubleshooting)
+> **Links rápidos:** [instalar Python](docs/GUIDE-PT.md#passo-1) · [primeiro uso](docs/GUIDE-PT.md#passo-5) · [alerta no navegador](docs/GUIDE-PT.md#passo-6) · [modo background](docs/GUIDE-PT.md#passo-7) · [problemas comuns](docs/GUIDE-PT.md#troubleshooting)
 
 ---
 
 ## Contribuindo
 
-PRs são bem-vindos. Direções de alto valor:
+PRs são bem-vindos. Direções que agregam mais valor:
 
-* CDS 5Y do Brasil ou EMBI+ como sinal de risco soberano
-* Calendário do COPOM como filtro de eventos de volatilidade
-* Momentum cross-sectional de FX em emergentes (ZAR, MXN, CLP)
-* Classificador HMM de 2 estados para substituir o ADX
+- CDS 5Y do Brasil ou EMBI+ como sinal de risco soberano
+- Calendário do COPOM como filtro de volatilidade
+- Momentum de moedas emergentes (ZAR, MXN, CLP)
+- Classificador HMM de 2 estados pra substituir o ADX
 
 Inclua um diff de acurácia do backtest em qualquer PR de sinal.
 
@@ -532,28 +316,38 @@ Inclua um diff de acurácia do backtest em qualquer PR de sinal.
 
 [MIT](LICENSE).
 
-> ⚠️ **Aviso legal.** Análise probabilística de dados de mercado públicos, apenas para fins informativos. Não é aconselhamento financeiro. O desempenho histórico não garante resultados futuros. Use por sua conta e risco.
+> ⚠️ **Aviso.** Isso é análise estatística de dados públicos, só pra informação. Não é recomendação de investimento. Resultado passado não garante resultado futuro. Use por sua conta e risco.
 
 ---
+
 ---
 
 ## English
 
-**cambio** is a probabilistic model that decides **how much** USD to convert each cycle. It runs 12 quant signals over public data, applies Vanguard-DCA discipline (never zero, never blindly all-in), and pings you in the browser when conviction is high enough to scale up the conversion size.
+**cambio** decides **how much** USD to convert each cycle using 12 quant signals over public data with Vanguard-DCA discipline (never zero, never all-in). It pings your browser/phone when conviction is high.
+
+### Quick start
+
+```bash
+pip install yfinance pandas numpy
+python server.py --dev                   # dashboard + live data collection
+python fx_timing.py --watch --notify     # CLI background mode
+```
+
+`server.py --dev` runs the web UI and collects live FX data in the background — no separate `--watch` process needed. Change `watch_interval_min` in the UI and it takes effect within 10 seconds.
 
 ### Features
 
-* 🎯 **Vanguard-DCA sizing** — every cycle converts a fraction in `[--dca-floor, --dca-ceiling]` proportional to conviction. Never zero, never blindly all-in.
-* ⚖️ **Cost-Matters validator** — the backtest declares whether the model edge clears **2× spread** (Bogle margin of safety). Otherwise it flags "INSIDE THE SPREAD".
-* ⏱️ **Deadline countdown** — `--watch` shows days remaining until forced execution, anchored on `--mark-executed`.
-* 📊 **Behavior-gap audit** (`--audit`) — how many alerts you ignored in the last N days.
-* 📡 **Live data** — BCB PTAX, AwesomeAPI (intraday), Yahoo, CFTC (COT), SELIC. No API keys.
-* 🔄 **Intraday-aware** — last bar replaced with the live tick before signals run.
-* 🛎️ **Browser alerts** (`--notify`) — HTML page with size card, deadline countdown and one-click Higlobe link.
-* 📱 **Phone alerts** (`--phone-alerts`) — ping your phone when USD/BRL rises past your threshold. Telegram by default, WhatsApp via Twilio optional. Setup via `python configure.py`.
-* 👁️ **Background mode** (`--watch`).
-* 📓 **Auto journal** — every call logged to `.fx_journal.db` (SQLite) with `size`, `notified`, `executed`.
-* 🟢 **Live dashboard** — `python server.py --dev` runs the web UI **and** collects live data in the background. No separate `--watch` loop needed.
+* 🎯 **Vanguard-DCA sizing** — converts a fraction in `[dca_floor, dca_ceiling]` proportional to conviction
+* ⚖️ **Cost-Matters validator** — flags if model edge doesn't clear 2× spread
+* ⏱️ **Deadline countdown** — days left until forced execution
+* 📊 **Behavior-gap audit** — shows how many alerts you ignored
+* 📡 **Live data** — BCB PTAX, AwesomeAPI, Yahoo, CFTC, SELIC. No API keys
+* 🖥️ **Web dashboard** — charts, thresholds, Telegram config, all in the browser
+* 🟢 **Background collection** — `server.py --dev` fetches data every 5 min automatically
+* 🛎️ **Browser alerts** — HTML page with size card and Higlobe link
+* 📱 **Phone alerts** — Telegram (free) or WhatsApp (via Twilio)
+* 📓 **SQLite journal** — every decision logged, CSV auto-migrated
 
 ### Installation
 
@@ -566,63 +360,56 @@ python3 -m venv .venv
 ### Usage
 
 ```bash
-# dashboard with live data collection (one command):
+# Dashboard with live data (one command):
 python server.py --dev
 # → http://localhost:5173
-# Collects data every 5 min, writes to DB, serves API + UI
 
-# custom interval (3 min):
-python server.py --dev --interval 3
+# Custom interval (1 min):
+python server.py --dev --interval 1
 
-# one-shot analysis
-.venv/bin/python fx_timing.py
+# CLI background mode (no UI):
+python fx_timing.py --watch --notify --phone-alerts
 
-# background with browser alerts (alternative, no UI)
-.venv/bin/python fx_timing.py --watch --notify
+# One-shot analysis:
+python fx_timing.py --lang pt
 
-# add phone alerts on rate spikes
-python configure.py
-.venv/bin/python fx_timing.py --watch --notify --phone-alerts
+# Mark that you converted (anchors the deadline):
+python fx_timing.py --mark-executed
 
-# backtest on your real schedule
-.venv/bin/python fx_timing.py --backtest --days 5 20 --deadline-days 15 --spread-bps 50
+# Behavior audit:
+python fx_timing.py --audit 30
+
+# Backtest on your schedule:
+python fx_timing.py --backtest --days 5 20
 ```
 
-### Phone alerts setup
-
-The `configure.py` CLI asks which provider you want and walks through the setup. Credentials are saved to a local `.env` (mode 600, gitignored — **nothing sensitive ever enters the repo**).
+### Phone alerts (Telegram, 2 min setup)
 
 ```bash
-python configure.py                       # interactive (picks provider)
-python configure.py --provider telegram   # skip the provider prompt
-python configure.py --test                # send a test message
-python configure.py --reset               # wipe anchor + cooldown
+python configure.py          # interactive setup
+python configure.py --test   # send test message
+python configure.py --reset   # clear anchor + cooldown
 ```
 
-#### Telegram (default, 2 min, free)
+1. Open `@BotFather` in Telegram → `/newbot` → get token
+2. Run `configure.py`, paste token, send any message to your bot
+3. Done — chat_id is auto-discovered
 
-1. In Telegram, open `@BotFather`
-2. Send `/newbot` → any name → username ending in `bot`
-3. BotFather gives you a **token** like `1234567890:AAH...`
-4. Run `python configure.py`, paste the token, send any message to your bot when asked
-5. The CLI auto-discovers your **chat_id** via `getUpdates`
-6. Accept the test — you'll get a message instantly
+### Thresholds (editable in the UI)
 
-#### WhatsApp (optional, via Twilio)
+| Name | Default | Meaning |
+|---|---|---|
+| `watch_interval_min` | 5 | Minutes between data collections |
+| `notify_threshold` | 0.40 | Min p(now) to trigger browser alert |
+| `notify_cooldown_hours` | 6 | Hours between browser alerts |
+| `alert_threshold_pct` | 1.0 | % rise vs anchor to trigger phone alert |
+| `alert_cooldown_min` | 5 | Minutes between phone alerts |
+| `dca_floor` | 0.25 | Min fraction per cycle (25%) |
+| `dca_ceiling` | 0.75 | Max fraction per cycle (75%) |
+| `spread_bps` | 50 | Effective FX spread in basis points |
+| `deadline_days` | 15 | Days until forced execution |
 
-Meta's WhatsApp Cloud API requires business verification that currently blocks many indie devs without a registered company. The viable path is Twilio:
-
-1. Account at [twilio.com/try-twilio](https://www.twilio.com/try-twilio)
-2. **Messaging → Try it out → Send a WhatsApp message** → enable sandbox
-3. From your WhatsApp, send `join <two-words>` to `+1 415 523 8886`
-4. Grab **Account SID** and **Auth Token** from the console
-5. Run `python configure.py --provider whatsapp` and paste them in
-
-#### Anchor logic
-
-The first observed rate becomes the anchor. Each tick is compared to it. If the rate falls, the anchor follows down (tracks the local low). If it rises beyond `--alert-threshold` and the cooldown has elapsed, an alert fires and the anchor jumps to the current rate — so the next alert requires another `+threshold` rally from there.
-
-State is persisted in `.fx_alert.state` (gitignored) and survives restarts. Use `--reset` after a manual exchange to clear it.
+Changes to `watch_interval_min` take effect within 10 seconds.
 
 ### CLI reference
 
@@ -642,55 +429,66 @@ fx_timing.py [--backtest] [--days DAY ...] [--lang {en,pt}]
 | `--days` | `2 17` | Day(s) of month you typically decide |
 | `--lang` | `en` | Output language (`en` or `pt`) |
 | `--deadline-days` | `15` | Forced-execution window |
-| `--spread-bps` | `50` | Effective FX spread in basis points |
-| `--dca-floor` | `0.25` | Minimum fraction to convert each cycle (Vanguard-DCA) |
-| `--dca-ceiling` | `1.00` | Maximum fraction when conviction is high |
+| `--dca-floor` | `0.25` | Min fraction per cycle (Vanguard-DCA) |
+| `--dca-ceiling` | `1.00` | Max fraction when conviction is high |
 | `--notify` | — | Open HTML alert on flip-to-NOW |
-| `--watch` | — | Background mode — re-run on a schedule |
-| `--watch-interval` | `5` | Minutes between checks in `--watch` |
-| `--name` | `Vitor` | Name shown in the browser alert |
-| `--phone-alerts` | — | Enable phone alerts (Telegram or WhatsApp) |
-| `--alert-provider` | `telegram` | Backend: `telegram` or `whatsapp` (overrides `.env`) |
-| `--alert-threshold` | `1.0` | % rise vs anchor that fires an alert |
-| `--alert-cooldown` | = `--watch-interval` | Minutes between consecutive alerts (matches the watch interval by default) |
-| `--mark-executed` | — | Mark the most recent journal entry as executed |
-| `--audit` | `30` | Print behavior-gap audit for the last N days |
+| `--watch` | — | Background mode |
+| `--watch-interval` | `5` | Minutes between checks |
+| `--phone-alerts` | — | Enable phone alerts (Telegram/WhatsApp) |
+| `--alert-threshold` | `1.0` | % rise vs anchor for phone alert |
+| `--mark-executed` | — | Mark latest journal entry as executed |
+| `--audit` | `30` | Behavior-gap audit for last N days |
+
+### API
+
+All endpoints at `http://127.0.0.1:8765/api/`:
+
+| Endpoint | Method | Description |
+|---|---|---|
+| `/dashboard` | GET | Summary + latest signals |
+| `/journal` | GET | Full journal |
+| `/state` | GET | Alert state (anchor, cooldown) |
+| `/thresholds` | GET/POST | Read/update thresholds |
+| `/notifier` | GET/POST | Telegram config status/save |
+| `/notifier/test` | POST | Send test message |
+| `/health` | GET | Health check |
+
+### Server flags
+
+| Flag | Default | Description |
+|---|---|---|
+| `--dev` | — | Start Vite dev server alongside API |
+| `--port` | 8765 | API port |
+| `--interval` | 5 | Minutes between data collections |
 
 ### Project layout
 
 | Module | Role |
 |---|---|
-| `server.py` | Web dashboard + live data collection — runs API and a background watch thread |
-| `fx_timing.py` | CLI, data fetch, signal pipeline, render, journal, notify, watch loop |
-| `signals.py` | Pure signal library — RSI, Bollinger %B, ADX, carry score, `build_signals` |
-| `journal_db.py` | SQLite journal — decisions, last-call summary, notify cooldown |
-| `notify.py` | HTML alert renderer (Fraunces + JetBrains Mono) and browser opener |
-| `notifiers/` | Pluggable messaging backends: `Notifier` Protocol + Telegram + WhatsApp |
-| `rate_alert.py` | Provider-agnostic spike alert (anchor/threshold/cooldown) |
-| `configure.py` | Interactive CLI — picks provider, writes `.env` (gitignored, mode 600) |
+| `server.py` | Web dashboard + API + background data collection |
+| `fx_timing.py` | CLI, data fetch, signal pipeline, render, watch loop |
+| `signals.py` | Pure signal library — RSI, Bollinger %B, ADX, carry |
+| `journal_db.py` | SQLite journal — decisions, cooldowns, audit |
+| `notify.py` | HTML alert renderer + browser opener |
+| `notifiers/` | Pluggable messaging — Telegram + WhatsApp |
+| `rate_alert.py` | Anchor/threshold/cooldown alert logic |
+| `configure.py` | Interactive Telegram/WhatsApp setup |
 
 ### Backtest
 
-Walk-forward, no look-ahead. Oracle = rate at the next scheduled check date.
+Walk-forward, no look-ahead. Oracle = rate at next scheduled check date.
 
 | Schedule | NOW | WAIT | Calls |
 |---|---|---|---|
-| 2nd & 17th (default) | 58.3 % | 44.4 % | 102 |
-| 5th & 20th | **75.0 %** | 42.2 % | 103 |
+| 2nd & 17th | 58% | 44% | 102 |
+| 5th & 20th | **75%** | 42% | 103 |
 
 ### Contributing
 
-PRs welcome. High-value directions:
-
-* Brazil 5Y CDS or EMBI+ spread as sovereign risk signal
-* COPOM calendar as a volatility event filter
-* Cross-sectional EM FX momentum (ZAR, MXN, CLP)
-* HMM 2-state regime classifier to replace ADX
-
-Include a backtest accuracy diff in any signal PR.
+PRs welcome. High-value directions: CDS 5Y or EMBI+ as sovereign risk signal, COPOM calendar filter, EM FX momentum, HMM regime classifier. Include a backtest accuracy diff.
 
 ### License
 
 [MIT](LICENSE).
 
-> ⚠️ **Disclaimer.** Probabilistic analysis of public market data, for informational purposes only. Not financial advice. Past performance does not guarantee future results. Use at your own risk.
+> ⚠️ Probabilistic analysis of public market data, for informational purposes only. Not financial advice. Past performance does not guarantee future results.
