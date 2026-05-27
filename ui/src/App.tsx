@@ -1518,18 +1518,20 @@ export default function App() {
         </div>
         <div className="header-meta">
           {health && (
-            <div className="status" style={{ marginBottom: 4 }}>
+            <div className="status">
               <StatusDot on={health.healthy} />
-              {health.healthy ? "api ok" : "api down"}{" "}
-              {formatUptime(health.uptime_seconds)}
+              <span>{health.healthy ? "api ok" : "api down"}</span>
+              <span className="status-sep">
+                {formatUptime(health.uptime_seconds)}
+              </span>
             </div>
           )}
-          {journal.length} sinais | {journal.filter((e) => e.notified).length}{" "}
-          alertas
           {notifier && (
-            <div style={{ marginTop: 4 }}>
-              <StatusDot on={notifier.is_configured} />{" "}
-              {notifier.is_configured ? "telegram on" : "telegram off"}
+            <div className="status">
+              <StatusDot on={notifier.is_configured} />
+              <span>
+                {notifier.is_configured ? "telegram" : "telegram off"}
+              </span>
             </div>
           )}
         </div>

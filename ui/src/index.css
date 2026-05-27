@@ -13,25 +13,27 @@
 }
 
 :root {
-    --bg: #09090b;
-    --bg-raised: #111113;
-    --bg-card: #18181b;
-    --bg-hover: #1f1f23;
-    --bg-input: #111113;
-    --border: #27272a;
-    --border-focus: #34d399;
-    --text: #fafafa;
-    --text-dim: #a1a1aa;
-    --text-faint: #52525b;
+    --bg: #0f1117;
+    --bg-raised: #181b25;
+    --bg-card: #1e2330;
+    --bg-hover: #252a38;
+    --bg-input: #181b25;
+    --border: #2a3042;
+    --border-focus: #60a5fa;
+    --text: #e8eaf0;
+    --text-dim: #8b92a8;
+    --text-faint: #4a5168;
+    --blue: #60a5fa;
+    --blue-dim: rgba(96, 165, 250, 0.1);
     --green: #34d399;
     --green-dim: rgba(52, 211, 153, 0.08);
     --red: #f87171;
     --red-dim: rgba(248, 113, 113, 0.08);
     --amber: #fbbf24;
     --amber-dim: rgba(251, 191, 36, 0.08);
-    --radius: 0.75rem;
-    --radius-sm: 0.5rem;
-    --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.3);
+    --radius: 0.6rem;
+    --radius-sm: 0.35rem;
+    --shadow-card: 0 1px 4px rgba(0, 0, 0, 0.4);
 }
 
 *,
@@ -53,8 +55,8 @@ body {
         -apple-system,
         BlinkMacSystemFont,
         sans-serif;
-    font-size: 17.5px;
-    line-height: 1.6;
+    font-size: 18px;
+    line-height: 1.65;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
 }
@@ -66,7 +68,7 @@ body {
 }
 
 a {
-    color: var(--green);
+    color: var(--blue);
     text-decoration: none;
 }
 a:hover {
@@ -76,9 +78,9 @@ a:hover {
 code {
     background: var(--bg-hover);
     padding: 0.15em 0.45em;
-    border-radius: 4px;
+    border-radius: var(--radius-sm);
     font-size: 0.88em;
-    color: var(--green);
+    color: var(--blue);
     border: 1px solid var(--border);
 }
 
@@ -92,7 +94,7 @@ h1 {
 
 h1 em {
     font-style: normal;
-    color: var(--green);
+    color: var(--blue);
 }
 
 h2 {
@@ -122,7 +124,7 @@ h2 {
     font-size: 0.66rem;
     text-transform: uppercase;
     letter-spacing: 0.22em;
-    color: var(--green);
+    color: var(--blue);
     margin-top: 0.35rem;
 }
 
@@ -166,8 +168,8 @@ h2 {
 }
 
 .tab.active {
-    color: var(--green);
-    border-bottom-color: var(--green);
+    color: var(--blue);
+    border-bottom-color: var(--blue);
     font-weight: 600;
 }
 
@@ -243,12 +245,12 @@ h2 {
 }
 
 .signal-row.primary {
-    border-color: var(--green);
+    border-color: var(--blue);
     padding: 0.85rem 1rem;
 }
 
 .signal-row.primary .signal-ts {
-    color: var(--green);
+    color: var(--blue);
     font-weight: 600;
 }
 
@@ -319,9 +321,9 @@ h2 {
 }
 
 .badge-now {
-    background: var(--green-dim);
-    color: var(--green);
-    border: 1px solid rgba(52, 211, 153, 0.15);
+    background: var(--blue-dim);
+    color: var(--blue);
+    border: 1px solid rgba(96, 165, 250, 0.2);
 }
 
 .badge-wait {
@@ -337,10 +339,10 @@ h2 {
 }
 
 .badge-icon {
-    background: var(--green-dim);
-    color: var(--green);
+    background: var(--blue-dim);
+    color: var(--blue);
     padding: 0.12rem 0.35rem;
-    border: 1px solid rgba(52, 211, 153, 0.15);
+    border: 1px solid rgba(96, 165, 250, 0.2);
 }
 
 /* ── tables ──────────────────────────────────────────────────────────────── */
@@ -418,8 +420,8 @@ tr:hover td {
 }
 
 .field-group input:focus {
-    border-color: var(--green);
-    box-shadow: 0 0 0 3px rgba(52, 211, 153, 0.12);
+    border-color: var(--blue);
+    box-shadow: 0 0 0 3px rgba(96, 165, 250, 0.15);
 }
 
 .field-group input::placeholder {
@@ -465,7 +467,7 @@ tr:hover td {
 }
 
 .btn-primary {
-    background: var(--green);
+    background: var(--blue);
     color: #09090b;
 }
 
@@ -508,6 +510,12 @@ tr:hover td {
     gap: 0.35rem;
     font-size: 0.73rem;
     font-weight: 600;
+    line-height: 1.8;
+}
+
+.status-sep {
+    color: var(--text-faint);
+    margin-left: 0.25rem;
 }
 
 .status-dot {
@@ -517,8 +525,8 @@ tr:hover td {
 }
 
 .status-dot.on {
-    background: var(--green);
-    box-shadow: 0 0 6px var(--green);
+    background: var(--blue);
+    box-shadow: 0 0 6px var(--blue);
 }
 
 .status-dot.off {
@@ -532,10 +540,10 @@ tr:hover td {
     bottom: 2rem;
     right: 2rem;
     background: var(--bg-card);
-    border: 1px solid var(--green);
+    border: 1px solid var(--blue);
     border-radius: var(--radius);
     padding: 0.7rem 1.2rem;
-    color: var(--green);
+    color: var(--blue);
     font-family: var(--font-geist-mono), "Geist Mono", ui-monospace, monospace;
     font-size: 0.78rem;
     font-weight: 600;
@@ -591,7 +599,7 @@ tr:hover td {
     width: 16px;
     height: 16px;
     border: 2px solid var(--border);
-    border-top-color: var(--green);
+    border-top-color: var(--blue);
     border-radius: 50%;
     animation: spin 0.7s linear infinite;
     flex-shrink: 0;
@@ -690,7 +698,7 @@ tr:hover td {
 /* ── utilities ────────────────────────────────────────────────────────────── */
 
 .up {
-    color: var(--green);
+    color: var(--blue);
 }
 .down {
     color: var(--amber);
@@ -791,7 +799,7 @@ tr:hover td {
     flex: 1;
     font-family: var(--font-geist-mono), "Geist Mono", ui-monospace, monospace;
     font-size: 0.75rem;
-    color: var(--green);
+    color: var(--blue);
     overflow-x: auto;
     white-space: nowrap;
 }
@@ -814,15 +822,15 @@ tr:hover td {
 }
 
 .cmd-copy:hover {
-    background: var(--green-dim);
-    color: var(--green);
-    border-color: var(--green);
+    background: var(--blue-dim);
+    color: var(--blue);
+    border-color: var(--blue);
 }
 
 .cmd-copy.copied {
-    background: var(--green-dim);
-    color: var(--green);
-    border-color: var(--green);
+    background: var(--blue-dim);
+    color: var(--blue);
+    border-color: var(--blue);
 }
 
 .cli-flags {
@@ -835,7 +843,7 @@ tr:hover td {
 }
 
 .cli-flags dt {
-    color: var(--green);
+    color: var(--blue);
     font-weight: 600;
     font-size: 0.68rem;
     font-family: var(--font-geist-mono), "Geist Mono", ui-monospace, monospace;
@@ -923,8 +931,8 @@ tr:hover td {
     width: 8px;
     height: 8px;
     border-radius: 50%;
-    background: var(--green);
-    box-shadow: 0 0 6px var(--green);
+    background: var(--blue);
+    box-shadow: 0 0 6px var(--blue);
     animation: liveBlink 2s ease-in-out infinite;
 }
 
@@ -1004,9 +1012,9 @@ tr:hover td {
 
 .broker-trigger.broker-hot {
     opacity: 1;
-    border-color: var(--green);
+    border-color: var(--blue);
     color: #09090b;
-    background: var(--green);
+    background: var(--blue);
     font-weight: 700;
     animation: brokerGlow 2s ease-in-out infinite;
 }
@@ -1019,7 +1027,7 @@ tr:hover td {
     position: absolute;
     inset: 0;
     border-radius: var(--radius-sm);
-    background: var(--green);
+    background: var(--blue);
     animation: brokerPulse 2s ease-in-out infinite;
     z-index: 0;
 }
@@ -1110,12 +1118,12 @@ tr:hover td {
 }
 
 .broker-link.broker-active {
-    color: var(--green);
+    color: var(--blue);
     font-weight: 600;
 }
 
 .broker-check {
-    color: var(--green);
+    color: var(--blue);
     font-size: 0.7rem;
 }
 
@@ -1128,7 +1136,7 @@ tr:hover td {
     font-family: var(--font-geist-mono), "Geist Mono", ui-monospace, monospace;
     font-size: 0.7rem;
     font-weight: 600;
-    color: var(--green);
+    color: var(--blue);
     text-decoration: none;
     border-radius: 0 0 var(--radius-sm) var(--radius-sm);
     transition: background 0.15s;

@@ -13,7 +13,7 @@ USD/BRL Exchange Timing Model
 pip install yfinance pandas numpy
 """
 
-__version__ = "0.7.0"
+__version__ = "0.7.3"
 
 import argparse
 import io
