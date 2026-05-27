@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import {
   ComposedChart,
   Bar,
@@ -26,6 +26,16 @@ interface Thresholds {
   spread_bps: number;
   deadline_days: number;
 }
+
+// UI-visible thresholds (subset of Thresholds)
+type VisibleThresholds = Pick<
+  Thresholds,
+  | "watch_interval_min"
+  | "notify_threshold"
+  | "notify_cooldown_hours"
+  | "alert_threshold_pct"
+  | "alert_cooldown_min"
+>;
 
 interface JournalEntry {
   ts: string;
@@ -74,12 +84,12 @@ async function fetchJson<T>(path: string): Promise<T> {
 }
 
 function fmtRate(v: number | null | undefined): string {
-  if (v == null || isNaN(v)) return "—";
+  if (v == null || isNaN(v)) return "\u2014";
   return `R$ ${v.toFixed(4)}`;
 }
 
 function fmtPct(v: number | null | undefined): string {
-  if (v == null || isNaN(v)) return "—";
+  if (v == null || isNaN(v)) return "\u2014";
   return `${(v * 100).toFixed(1)}%`;
 }
 
@@ -120,12 +130,12 @@ const CLI_SECTIONS = [
         code: "python fx_timing.py --watch --notify --phone-alerts",
       },
       { label: "Dashboard", code: "python server.py --dev" },
-      { label: "Análise única", code: "python fx_timing.py" },
+      { label: "Analise unica", code: "python fx_timing.py" },
       { label: "PT-BR", code: "python fx_timing.py --lang pt --notify" },
     ],
   },
   {
-    title: "Configuração",
+    title: "Configuracao",
     desc: "Ajuste thresholds e configure alertas.",
     cmds: [
       { label: "Setup Telegram", code: "python configure.py" },
@@ -144,26 +154,26 @@ const CLI_SECTIONS = [
     ],
   },
   {
-    title: "Diário & Auditoria",
-    desc: "Consulte o histórico e auditoria de sinais.",
+    title: "Diario & Auditoria",
+    desc: "Consulte o historico e auditoria de sinais.",
     cmds: [
       { label: "Ver sinais", code: "python fx_timing.py --show-journal" },
-      { label: "Últimos 50", code: "python fx_timing.py --show-journal 50" },
+      { label: "Ultimos 50", code: "python fx_timing.py --show-journal 50" },
       { label: "Auditoria 30d", code: "python fx_timing.py --audit" },
       { label: "Auditoria 90d", code: "python fx_timing.py --audit 90" },
     ],
   },
   {
-    title: "Backtest & Marcações",
-    desc: "Backtest para validar estratégia e marcar execuções.",
+    title: "Backtest & Marcacoes",
+    desc: "Backtest para validar estrategia e marcar execucoes.",
     cmds: [
-      { label: "Backtest padrão", code: "python fx_timing.py --backtest" },
+      { label: "Backtest padrao", code: "python fx_timing.py --backtest" },
       {
         label: "Dias custom",
         code: "python fx_timing.py --backtest --days 5 20",
       },
       {
-        label: "Prazo forçado",
+        label: "Prazo forcado",
         code: "python fx_timing.py --backtest --deadline-days 15",
       },
       {
@@ -175,29 +185,29 @@ const CLI_SECTIONS = [
 ];
 
 const CLI_FLAGS = [
-  { flag: "--watch", desc: "Loop contínuo de checagem" },
+  { flag: "--watch", desc: "Loop continuo de checagem" },
   { flag: "--notify", desc: "Abre alerta HTML no navegador" },
   { flag: "--phone-alerts", desc: "Envia alertas via Telegram" },
-  { flag: "--watch-interval N", desc: "Minutos entre checks (padrão: 5)" },
+  { flag: "--watch-interval N", desc: "Minutos entre checks (padrao: 5)" },
   {
     flag: "--alert-threshold N",
-    desc: "% de alta vs âncora para alerta (padrão: 1.0)",
+    desc: "% de alta vs ancora para alerta (padrao: 1.0)",
   },
   { flag: "--alert-cooldown N", desc: "Minutos entre alertas Telegram" },
   {
     flag: "--dca-floor FRAC",
-    desc: "Fração mínima por conversão (padrão: 0.25)",
+    desc: "Fracao minima por conversao (padrao: 0.25)",
   },
   {
     flag: "--dca-ceiling FRAC",
-    desc: "Fração máxima por conversão (padrão: 0.75)",
+    desc: "Fracao maxima por conversao (padrao: 0.75)",
   },
-  { flag: "--deadline-days N", desc: "Prazo máximo em dias (padrão: 15)" },
-  { flag: "--spread-bps N", desc: "Spread em basis points (padrão: 50)" },
-  { flag: "--lang pt|en", desc: "Idioma de saída" },
-  { flag: "--mark-executed", desc: "Marca último sinal como executado" },
-  { flag: "--show-journal [N]", desc: "Mostra últimos N sinais" },
-  { flag: "--audit [N]", desc: "Auditoria dos últimos N dias" },
+  { flag: "--deadline-days N", desc: "Prazo maximo em dias (padrao: 15)" },
+  { flag: "--spread-bps N", desc: "Spread em basis points (padrao: 50)" },
+  { flag: "--lang pt|en", desc: "Idioma de saida" },
+  { flag: "--mark-executed", desc: "Marca ultimo sinal como executado" },
+  { flag: "--show-journal [N]", desc: "Mostra ultimos N sinais" },
+  { flag: "--audit [N]", desc: "Auditoria dos ultimos N dias" },
 ];
 
 // ── components ────────────────────────────────────────────────────────────────
@@ -240,21 +250,21 @@ function BrokerButton({ pNow }: { pNow: number | null }) {
         }}
         title={
           hot
-            ? `p(agora) ≥ 50% — abrir ${choice.name}`
+            ? `p(agora) >= 50% - abrir ${choice.name}`
             : warm
-              ? "p(agora) subindo…"
+              ? "p(agora) subindo"
               : "p(agora) < 40%"
         }
       >
-        <span className="broker-icon">↗</span>
+        <span className="broker-icon">&#8599;</span>
         <span className="broker-label">
-          {hot ? choice.name : warm ? "Quase…" : "Aguardar"}
+          {hot ? choice.name : warm ? "Quase" : "Aguardar"}
         </span>
         {hot && <span className="broker-pulse" />}
       </button>
       {open && (
         <div className="broker-menu">
-          <div className="broker-menu-title">Corretora padrão</div>
+          <div className="broker-menu-title">Corretora padrao</div>
           {BROKERS.map((b) => (
             <button
               key={b.name}
@@ -262,7 +272,9 @@ function BrokerButton({ pNow }: { pNow: number | null }) {
               onClick={() => pick(b.name)}
             >
               {b.name}
-              {b.name === pref && <span className="broker-check">✓</span>}
+              {b.name === pref && (
+                <span className="broker-check">&#10003;</span>
+              )}
             </button>
           ))}
           <a
@@ -288,9 +300,6 @@ function LivePulse({
   intervalSec: number;
   lastSignalTs: string | null;
 }) {
-  // Progress wraps around — once a cycle completes, it restarts.
-  // This prevents the ring from sitting stuck at 0 when the last signal
-  // is older than the watch interval.
   const anchorMs = lastSignalTs ? new Date(lastSignalTs).getTime() : 0;
   const intervalMs = intervalSec * 1000;
   const [progress, setProgress] = useState(() =>
@@ -337,7 +346,7 @@ function LivePulse({
             cy="22"
             r={r}
             fill="none"
-            stroke="var(--accent)"
+            stroke="var(--green)"
             strokeWidth="2.5"
             strokeDasharray={`${dash} ${circ - dash}`}
             strokeLinecap="round"
@@ -347,7 +356,7 @@ function LivePulse({
         <div className="live-dot" />
       </div>
       <div className="live-info">
-        <span className="live-label">próxima coleta em</span>
+        <span className="live-label">proxima coleta em</span>
         <span className="live-countdown">{timeStr}</span>
       </div>
     </div>
@@ -411,7 +420,7 @@ function ConfirmDialog({
             disabled={loading}
           >
             {loading && <Spinner />}
-            {loading ? "Salvando…" : "Confirmar"}
+            {loading ? "Salvando..." : "Confirmar"}
           </button>
           <button
             className="btn btn-ghost"
@@ -432,12 +441,9 @@ function Dashboard({ data }: { data: DashboardData }) {
   const { state, thresholds, recent_signals, total_signals, total_alerts } =
     data;
   const anchor = (state as Record<string, number | undefined>).anchor_rate;
-  const lastAlertTs = (state as Record<string, string | undefined>)
-    .last_alert_ts;
   const lastRate =
     recent_signals[0]?.rate_live || recent_signals[0]?.rate_signal;
 
-  // Hero: latest rate big display
   const lastDecision = recent_signals[0];
   const watchIntervalSec = (thresholds.watch_interval_min || 5) * 60;
 
@@ -511,26 +517,19 @@ function Dashboard({ data }: { data: DashboardData }) {
                 p(agora){" "}
                 <strong className="up">{fmtPct(lastDecision.p_now)}</strong>
               </span>
-              <span>
-                regime{" "}
-                <strong className={lastDecision.regime >= 0 ? "up" : "down"}>
-                  {lastDecision.regime >= 0 ? "+" : ""}
-                  {lastDecision.regime.toFixed(2)}
-                </strong>
-              </span>
             </div>
           )}
         </div>
       )}
 
-      {/* metrics */}
+      {/* metrics - only what matters */}
       <div className="metric-grid">
         <div className="metric">
-          <div className="metric-label">Sinais</div>
+          <div className="metric-label">sinais</div>
           <div className="metric-value">{total_signals}</div>
         </div>
         <div className="metric">
-          <div className="metric-label">Alertas</div>
+          <div className="metric-label">alertas</div>
           <div
             className="metric-value"
             style={{ color: total_alerts > 0 ? "var(--amber)" : undefined }}
@@ -539,30 +538,12 @@ function Dashboard({ data }: { data: DashboardData }) {
           </div>
         </div>
         <div className="metric">
-          <div className="metric-label">Âncora</div>
+          <div className="metric-label">ancora</div>
           <div
             className="metric-value"
-            style={{ color: anchor ? "var(--accent-bright)" : undefined }}
+            style={{ color: anchor ? "var(--green)" : undefined }}
           >
-            {anchor ? `R$ ${anchor.toFixed(2)}` : "—"}
-          </div>
-        </div>
-        <div className="metric">
-          <div className="metric-label">Último alerta</div>
-          <div className="metric-value">
-            {lastAlertTs ? fmtTs(lastAlertTs) : "—"}
-          </div>
-        </div>
-        <div className="metric">
-          <div className="metric-label">DCA floor</div>
-          <div className="metric-value">
-            {(thresholds.dca_floor * 100).toFixed(0)}%
-          </div>
-        </div>
-        <div className="metric">
-          <div className="metric-label">DCA ceiling</div>
-          <div className="metric-value">
-            {(thresholds.dca_ceiling * 100).toFixed(0)}%
+            {anchor ? `R$ ${anchor.toFixed(2)}` : "\u2014"}
           </div>
         </div>
       </div>
@@ -570,13 +551,13 @@ function Dashboard({ data }: { data: DashboardData }) {
       {/* chart */}
       {chartData.length > 0 && (
         <div className="section">
-          <h2>Evolução</h2>
+          <h2>Evolucao</h2>
           <div className="card" style={{ paddingBottom: "0.25rem" }}>
             <div className="chart-legend">
               <div className="chart-legend-item">
                 <span
                   className="chart-legend-swatch"
-                  style={{ background: "#818cf8" }}
+                  style={{ background: "var(--text-dim)" }}
                 />{" "}
                 USD/BRL
               </div>
@@ -610,7 +591,7 @@ function Dashboard({ data }: { data: DashboardData }) {
                     }}
                   />
                 </span>
-                p(agora) &lt;40 / 40–50 / ≥50%
+                p(agora) &lt;40 / 40-50 / &gt;=50%
               </div>
             </div>
             <ResponsiveContainer width="100%" height={220}>
@@ -627,7 +608,7 @@ function Dashboard({ data }: { data: DashboardData }) {
                 <YAxis
                   yAxisId="rate"
                   orientation="left"
-                  tick={{ fill: "#818cf8", fontSize: 9 }}
+                  tick={{ fill: "var(--text-dim)", fontSize: 9 }}
                   tickLine={false}
                   axisLine={{ stroke: "var(--border)" }}
                   domain={["auto", "auto"]}
@@ -648,35 +629,35 @@ function Dashboard({ data }: { data: DashboardData }) {
                     border: "1px solid var(--border)",
                     borderRadius: "var(--radius-sm)",
                     fontSize: "0.75rem",
-                    fontFamily: "var(--mono)",
+                    fontFamily: "var(--font-geist-mono), monospace",
                   }}
-                  labelFormatter={(label: string) => label || "—"}
+                  labelFormatter={(label: string) => label || "\u2014"}
                 />
                 <ReferenceArea
                   yAxisId="pct"
                   y1={0}
                   y2={40}
                   fill="#f87171"
-                  fillOpacity={0.08}
+                  fillOpacity={0.06}
                 />
                 <ReferenceArea
                   yAxisId="pct"
                   y1={40}
                   y2={50}
                   fill="#fbbf24"
-                  fillOpacity={0.08}
+                  fillOpacity={0.06}
                 />
                 <ReferenceArea
                   yAxisId="pct"
                   y1={50}
                   y2={100}
                   fill="#34d399"
-                  fillOpacity={0.08}
+                  fillOpacity={0.06}
                 />
                 <Bar
                   yAxisId="rate"
                   dataKey="rate"
-                  fill="#818cf8"
+                  fill="#52525b"
                   fillOpacity={0.85}
                   radius={[2, 2, 0, 0]}
                   barSize={9}
@@ -720,10 +701,10 @@ function Dashboard({ data }: { data: DashboardData }) {
 
       {/* last 10 signals */}
       <div className="section">
-        <h2>Últimos sinais</h2>
+        <h2>Ultimos sinais</h2>
         {recent_signals.length === 0 ? (
           <div className="empty">
-            <div className="empty-icon">—</div>
+            <div className="empty-icon">&#8212;</div>
             Nenhum sinal ainda. Rode <code>python fx_timing.py --watch</code>
           </div>
         ) : (
@@ -736,17 +717,11 @@ function Dashboard({ data }: { data: DashboardData }) {
                   key={i}
                   className={`signal-row ${isPrimary ? "primary" : ""}`}
                 >
-                  <span className={`signal-ts ${isPrimary ? "signal-ts" : ""}`}>
-                    {fmtTs(e.ts)}
-                  </span>
+                  <span className="signal-ts">{fmtTs(e.ts)}</span>
                   <span className="signal-decision">
                     <DecisionBadge decision={e.decision} size={e.size} />
                   </span>
-                  <span
-                    className={`signal-rate ${isPrimary ? "signal-rate" : ""}`}
-                  >
-                    {fmtRate(rate)}
-                  </span>
+                  <span className="signal-rate">{fmtRate(rate)}</span>
                   <span className="signal-details">
                     <span>
                       p(agora){" "}
@@ -774,30 +749,16 @@ function Dashboard({ data }: { data: DashboardData }) {
                         {fmtPct(e.p_wait)}
                       </strong>
                     </span>
-                    <span>
-                      comp{" "}
-                      <strong>
-                        {e.composite >= 0 ? "+" : ""}
-                        {e.composite.toFixed(2)}
-                      </strong>
-                    </span>
-                    <span>
-                      regime{" "}
-                      <strong className={e.regime >= 0 ? "up" : "down"}>
-                        {e.regime >= 0 ? "+" : ""}
-                        {e.regime.toFixed(2)}
-                      </strong>
-                    </span>
                   </span>
                   <span className="signal-tags">
                     {e.notified && (
                       <span className="badge badge-icon" title="alertado">
-                        📱
+                        &#x1F4F1;
                       </span>
                     )}
                     {e.executed && (
                       <span className="badge badge-icon" title="executado">
-                        ✓
+                        &#10003;
                       </span>
                     )}
                   </span>
@@ -824,20 +785,17 @@ function Dashboard({ data }: { data: DashboardData }) {
               watch <strong>{thresholds.watch_interval_min}m</strong>
             </div>
             <div>
-              notify ≥ <strong>{fmtPct(thresholds.notify_threshold)}</strong>
+              notify <strong>{fmtPct(thresholds.notify_threshold)}</strong>
             </div>
             <div>
               cooldown <strong>{thresholds.notify_cooldown_hours}h</strong>
             </div>
             <div>
-              alerta +
+              alerta{" "}
               <strong>{thresholds.alert_threshold_pct.toFixed(2)}%</strong>
             </div>
             <div>
-              spread <strong>{thresholds.spread_bps}bps</strong>
-            </div>
-            <div>
-              deadline <strong>{thresholds.deadline_days}d</strong>
+              alert cooldown <strong>{thresholds.alert_cooldown_min}min</strong>
             </div>
           </div>
         </div>
@@ -852,7 +810,7 @@ function HistoryTable({ entries }: { entries: JournalEntry[] }) {
   if (!entries.length) {
     return (
       <div className="empty">
-        <div className="empty-icon">📋</div>
+        <div className="empty-icon">&#x1F4CB;</div>
         Nenhum sinal ainda.
         <br />
         Rode <code>python fx_timing.py --watch</code>
@@ -866,13 +824,10 @@ function HistoryTable({ entries }: { entries: JournalEntry[] }) {
         <thead>
           <tr>
             <th>data</th>
-            <th>decisão</th>
+            <th>decisao</th>
             <th>taxa</th>
             <th>p(agora)</th>
-            <th>p(split)</th>
-            <th>p(wait)</th>
-            <th>comp</th>
-            <th>regime</th>
+            <th>tamanho</th>
             <th></th>
           </tr>
         </thead>
@@ -897,25 +852,12 @@ function HistoryTable({ entries }: { entries: JournalEntry[] }) {
                 >
                   {fmtPct(e.p_now)}
                 </td>
-                <td className={e.decision === "split" ? "up" : ""}>
-                  {fmtPct(e.p_split)}
-                </td>
-                <td className={e.decision === "wait" ? "down" : ""}>
-                  {fmtPct(e.p_wait)}
-                </td>
-                <td className={e.composite >= 0 ? "up" : "down"}>
-                  {e.composite >= 0 ? "+" : ""}
-                  {e.composite.toFixed(2)}
-                </td>
-                <td className={e.regime >= 0 ? "up" : "down"}>
-                  {e.regime >= 0 ? "+" : ""}
-                  {e.regime.toFixed(2)}
-                </td>
+                <td>{(e.size * 100).toFixed(0)}%</td>
                 <td>
-                  {e.notified && <span title="alertado">📱</span>}
+                  {e.notified && <span title="alertado">&#x1F4F1;</span>}
                   {e.executed && (
                     <span title="executado" style={{ marginLeft: 4 }}>
-                      ✓
+                      &#10003;
                     </span>
                   )}
                 </td>
@@ -933,7 +875,7 @@ function AlertsTable({ entries }: { entries: JournalEntry[] }) {
   if (!notified.length) {
     return (
       <div className="empty">
-        <div className="empty-icon">🔔</div>Nenhum alerta ainda.
+        <div className="empty-icon">&#x1F514;</div>Nenhum alerta ainda.
       </div>
     );
   }
@@ -946,7 +888,7 @@ type ThresholdGroup = {
   title: string;
   desc: string;
   fields: {
-    key: keyof Thresholds;
+    key: keyof VisibleThresholds;
     label: string;
     hint: string;
     step?: string;
@@ -961,17 +903,30 @@ function ThresholdsPanel({
   thresholds: Thresholds;
   onSave: (t: Partial<Thresholds>) => void;
 }) {
-  const [form, setForm] = useState<Thresholds>(thresholds);
+  const [form, setForm] = useState<VisibleThresholds>({
+    watch_interval_min: thresholds.watch_interval_min,
+    notify_threshold: thresholds.notify_threshold,
+    notify_cooldown_hours: thresholds.notify_cooldown_hours,
+    alert_threshold_pct: thresholds.alert_threshold_pct,
+    alert_cooldown_min: thresholds.alert_cooldown_min,
+  });
   const [dirty, setDirty] = useState(false);
   const [confirm, setConfirm] = useState(false);
 
   useEffect(() => {
-    setForm(thresholds);
+    setForm({
+      watch_interval_min: thresholds.watch_interval_min,
+      notify_threshold: thresholds.notify_threshold,
+      notify_cooldown_hours: thresholds.notify_cooldown_hours,
+      alert_threshold_pct: thresholds.alert_threshold_pct,
+      alert_cooldown_min: thresholds.alert_cooldown_min,
+    });
     setDirty(false);
   }, [thresholds]);
 
   const set =
-    (key: keyof Thresholds) => (e: React.ChangeEvent<HTMLInputElement>) => {
+    (key: keyof VisibleThresholds) =>
+    (e: React.ChangeEvent<HTMLInputElement>) => {
       setForm((p) => ({ ...p, [key]: parseFloat(e.target.value) || 0 }));
       setDirty(true);
     };
@@ -979,74 +934,44 @@ function ThresholdsPanel({
   const groups: ThresholdGroup[] = [
     {
       title: "Monitoramento",
-      desc: "Controlam a frequência de checagem e quando abrir o alerta HTML no navegador.",
+      desc: "Controlam a frequencia de checagem e quando abrir o alerta HTML no navegador.",
       fields: [
         {
           key: "watch_interval_min",
           label: "Intervalo de watch",
-          hint: "A cada quantos minutos o sistema consulta a cotação USD/BRL em modo --watch.",
+          hint: "A cada quantos minutos o sistema consulta a cotacao USD/BRL em modo --watch.",
           suffix: "min",
         },
         {
           key: "notify_threshold",
-          label: "p(agora) mínimo",
-          hint: "Probabilidade mínima para abrir o alerta HTML. 0.40 = só alerta quando o modelo tem ≥ 40% de convicção em converter agora.",
+          label: "p(agora) minimo",
+          hint: "Probabilidade minima para abrir o alerta HTML. 0.40 = so alerta quando o modelo tem >= 40% de conviccao em converter agora.",
           step: "0.05",
         },
         {
           key: "notify_cooldown_hours",
           label: "Cooldown de alerta",
-          hint: "Horas de silêncio entre um alerta HTML e o próximo. Evita spam em alta volatilidade.",
+          hint: "Horas de silencio entre um alerta HTML e o proximo. Evita spam em alta volatilidade.",
           suffix: "h",
         },
       ],
     },
     {
       title: "Alertas no celular",
-      desc: "Disparam via Telegram quando o USD/BRL sobe além da âncora.",
+      desc: "Disparam via Telegram quando o USD/BRL sobe alem da ancora.",
       fields: [
         {
           key: "alert_threshold_pct",
           label: "Limiar de alta",
-          hint: "Percentual de alta vs. a âncora que dispara o alerta. Ex: 1.0 = alerta quando o dólar sobe 1% desde a última notificação.",
+          hint: "Percentual de alta vs. a ancora que dispara o alerta. Ex: 1.0 = alerta quando o dolar sobe 1% desde a ultima notificacao.",
           step: "0.1",
           suffix: "%",
         },
         {
           key: "alert_cooldown_min",
           label: "Cooldown de celular",
-          hint: "Minutos de silêncio entre alertas no Telegram. Alinhe com o watch_interval para não perder oportunidades.",
+          hint: "Minutos de silencio entre alertas no Telegram. Alinhe com o watch_interval para nao perder oportunidades.",
           suffix: "min",
-        },
-      ],
-    },
-    {
-      title: "Disciplina de conversão",
-      desc: "Inspirado no Vanguard DCA — controlam quanto converter por vez e o custo do spread.",
-      fields: [
-        {
-          key: "dca_floor",
-          label: "Fração mínima (floor)",
-          hint: "Mesmo com baixa convicção, sempre converte ao menos esta fração do saldo. DCA puro usa 0.25.",
-          step: "0.05",
-        },
-        {
-          key: "dca_ceiling",
-          label: "Fração máxima (ceiling)",
-          hint: "Quando a convicção é alta, converte no máximo esta fração. Evita all-in em sinais falsos.",
-          step: "0.05",
-        },
-        {
-          key: "spread_bps",
-          label: "Spread cambial",
-          hint: "Custo efetivo do câmbio em basis points. Usado no backtest para calcular se o modelo bate o custo. 50 bps ≈ 0.50% (fintech).",
-          suffix: "bps",
-        },
-        {
-          key: "deadline_days",
-          label: "Prazo máximo",
-          hint: "Dias até execução forçada. Após marcar um câmbio executado, o relógio reseta. Força disciplina: converte mesmo sem sinal se o prazo estourar.",
-          suffix: "d",
         },
       ],
     },
@@ -1075,12 +1000,19 @@ function ThresholdsPanel({
           >
             label
           </span>{" "}
-          para ver a explicação.
+          para ver a explicacao.
         </p>
 
         {groups.map((g) => (
           <div key={g.title} className="mb" style={{ marginBottom: "1.8rem" }}>
-            <h2 style={{ fontSize: "1rem", marginBottom: "0.15rem" }}>
+            <h2
+              style={{
+                fontSize: "1rem",
+                marginBottom: "0.15rem",
+                textTransform: "none",
+                letterSpacing: "0",
+              }}
+            >
               {g.title}
             </h2>
             <p
@@ -1173,7 +1105,13 @@ function ThresholdsPanel({
             className="btn btn-ghost"
             disabled={!dirty}
             onClick={() => {
-              setForm(thresholds);
+              setForm({
+                watch_interval_min: thresholds.watch_interval_min,
+                notify_threshold: thresholds.notify_threshold,
+                notify_cooldown_hours: thresholds.notify_cooldown_hours,
+                alert_threshold_pct: thresholds.alert_threshold_pct,
+                alert_cooldown_min: thresholds.alert_cooldown_min,
+              });
               setDirty(false);
             }}
           >
@@ -1184,10 +1122,17 @@ function ThresholdsPanel({
       {confirm && (
         <ConfirmDialog
           title="Salvar thresholds?"
-          message="Alterar thresholds afeta o comportamento do --watch, alertas e decisões de tamanho."
+          message="Alterar thresholds afeta o comportamento do --watch, alertas e decisoes de tamanho."
           onConfirm={() => {
             const delta: Partial<Thresholds> = {};
-            for (const key of Object.keys(thresholds) as (keyof Thresholds)[]) {
+            const visibleKeys: (keyof VisibleThresholds)[] = [
+              "watch_interval_min",
+              "notify_threshold",
+              "notify_cooldown_hours",
+              "alert_threshold_pct",
+              "alert_cooldown_min",
+            ];
+            for (const key of visibleKeys) {
               if (form[key] !== thresholds[key]) delta[key] = form[key];
             }
             if (Object.keys(delta).length) onSave(delta);
@@ -1232,7 +1177,7 @@ function PhoneConfig({
         <div className="card">
           <div className="config-status">
             <StatusDot on={configured} />
-            <strong>{configured ? "Configurado ✓" : "Não configurado"}</strong>
+            <strong>{configured ? "Configurado" : "Nao configurado"}</strong>
             {!configured && notifier.missing_keys.length > 0 && (
               <span style={{ color: "var(--text-dim)", fontSize: "0.78rem" }}>
                 faltam: {notifier.missing_keys.join(", ")}
@@ -1247,8 +1192,8 @@ function PhoneConfig({
             </a>{" "}
             no Telegram, cole o token abaixo.
             <br />
-            <strong>2.</strong> Mande qualquer mensagem pro bot. O chat_id será
-            descoberto automaticamente no teste, ou você pode colar manualmente.
+            <strong>2.</strong> Mande qualquer mensagem pro bot. O chat_id sera
+            descoberto automaticamente no teste, ou voce pode colar manualmente.
           </div>
 
           <div className="field-grid mb">
@@ -1274,7 +1219,7 @@ function PhoneConfig({
                 type="text"
                 placeholder={
                   notifier.telegram_chat_id ||
-                  "Deixe vazio — descoberto no teste"
+                  "Deixe vazio - descoberto no teste"
                 }
                 value={chatId}
                 onChange={(e) => setChatId(e.target.value)}
@@ -1308,7 +1253,7 @@ function PhoneConfig({
           title="Salvar Telegram?"
           message={
             configured
-              ? "Isso vai sobrescrever a configuração atual do Telegram."
+              ? "Isso vai sobrescrever a configuracao atual do Telegram."
               : `Configurar alertas via ${token ? "bot" : "Telegram"}?`
           }
           onConfirm={() => {
@@ -1334,7 +1279,7 @@ function CliPanel() {
   return (
     <div>
       <div className="section">
-        <h2>Referência CLI</h2>
+        <h2>Referencia CLI</h2>
         <p
           style={{
             color: "var(--text-dim)",
@@ -1363,7 +1308,7 @@ function CliPanel() {
                       className={`cmd-copy ${copied === id ? "copied" : ""}`}
                       onClick={() => copy(cmd.code, id)}
                     >
-                      {copied === id ? "✓ copiado" : "copiar"}
+                      {copied === id ? "copiado" : "copiar"}
                     </button>
                   </div>
                 );
@@ -1375,14 +1320,14 @@ function CliPanel() {
         <div className="cli-section">
           <h2>Flags</h2>
           <p className="cli-desc">
-            Parâmetros disponíveis para todos os comandos.
+            Parametros disponiveis para todos os comandos.
           </p>
           <dl className="cli-flags">
             {CLI_FLAGS.map((f) => (
-              <>
+              <React.Fragment key={f.flag}>
                 <dt>{f.flag}</dt>
                 <dd>{f.desc}</dd>
-              </>
+              </React.Fragment>
             ))}
           </dl>
         </div>
@@ -1390,8 +1335,8 @@ function CliPanel() {
         <div className="cli-section">
           <h2>API</h2>
           <p className="cli-desc">
-            O servidor em <code>server.py</code> expõe endpoints REST para
-            integração externa.
+            O servidor em <code>server.py</code> expoe endpoints REST para
+            integracao externa.
           </p>
           <div className="cmd-grid">
             {[
@@ -1422,7 +1367,7 @@ function CliPanel() {
                     className={`cmd-copy ${copied === id ? "copied" : ""}`}
                     onClick={() => copy(cmd.code, id)}
                   >
-                    {copied === id ? "✓ copiado" : "copiar"}
+                    {copied === id ? "copiado" : "copiar"}
                   </button>
                 </div>
               );
@@ -1495,7 +1440,7 @@ export default function App() {
       const data = await res.json();
       if (data.ok) {
         setThresholds(data.thresholds);
-        showToast("Thresholds salvos ✓");
+        showToast("Thresholds salvos");
       }
     } catch {
       showToast("Erro ao salvar", true);
@@ -1517,7 +1462,7 @@ export default function App() {
       const data = await res.json();
       if (data.ok) {
         setNotifier(data.status);
-        showToast("Configuração salva ✓");
+        showToast("Configuracao salva");
       } else {
         showToast(data.error || "Erro", true);
       }
@@ -1534,7 +1479,7 @@ export default function App() {
       const res = await fetch(`${API}/notifier/test`, { method: "POST" });
       const data = await res.json();
       if (data.ok) {
-        showToast(data.message || "Teste enviado ✓");
+        showToast(data.message || "Teste enviado");
         await refresh();
       } else {
         showToast(data.error || "Falha no teste", true);
@@ -1550,7 +1495,7 @@ export default function App() {
     return (
       <div className="loading">
         <Spinner />
-        carregando…
+        carregando...
       </div>
     );
   }
@@ -1575,12 +1520,11 @@ export default function App() {
           {health && (
             <div className="status" style={{ marginBottom: 4 }}>
               <StatusDot on={health.healthy} />
-              {health.healthy ? "api ok" : "api down"}
-              {" · "}
+              {health.healthy ? "api ok" : "api down"}{" "}
               {formatUptime(health.uptime_seconds)}
             </div>
           )}
-          {journal.length} sinais · {journal.filter((e) => e.notified).length}{" "}
+          {journal.length} sinais | {journal.filter((e) => e.notified).length}{" "}
           alertas
           {notifier && (
             <div style={{ marginTop: 4 }}>
@@ -1595,7 +1539,7 @@ export default function App() {
         {(
           [
             ["dashboard", "Dashboard"],
-            ["history", "Histórico"],
+            ["history", "Historico"],
             ["alerts", "Alertas"],
             ["phone", "Telegram"],
             ["thresholds", "Thresholds"],
