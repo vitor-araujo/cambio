@@ -438,33 +438,51 @@ def start_vite(ui_dir: str) -> subprocess.Popen:
 # ── background data collection ──────────────────────────────────────────────
 
 
-def _watch_worker(interval_min: int = 5) -> None:
-    """Background thread: runs a live FX cycle every `interval_min` minutes."""
+def _watch_worker(cli_interval_min: int = 5) -> None:
+    """Background thread: runs a live FX cycle, re-reading thresholds each tick.
+
+    The interval and signal parameters come from the thresholds file
+    (editable via the UI), so changes take effect on the next cycle.
+    """
     import fx_timing
 
-    args = argparse.Namespace(
-        lang="en",
-        notify=False,
-        phone_alerts=False,
-        alert_threshold=1.0,
-        alert_cooldown=interval_min,
-        alert_provider=None,
-        dca_floor=0.25,
-        dca_ceiling=1.0,
-        deadline_days=15,
-        name="Vitor",
-    )
-
     # Let the server start first
-    time.sleep(5)
+    time.sleep(3)
 
     cycle = 0
+    last_interval = cli_interval_min
+    cache = None
+    log.info("watch thread started — interval=%d min (from CLI)", cli_interval_min)
+
     while True:
+        # Re-read thresholds every cycle so UI changes take effect immediately.
+        t = load_thresholds()
+        interval_min = int(t.get("watch_interval_min", cli_interval_min))
+        if interval_min != last_interval:
+            log.info("watch interval changed: %d → %d min", last_interval, interval_min)
+            last_interval = interval_min
+
+        args = argparse.Namespace(
+            lang="en",
+            notify=False,
+            phone_alerts=False,
+            alert_threshold=float(t.get("alert_threshold_pct", 1.0)),
+            alert_cooldown=int(t.get("alert_cooldown_min", interval_min)),
+            alert_provider=None,
+            dca_floor=float(t.get("dca_floor", 0.25)),
+            dca_ceiling=float(t.get("dca_ceiling", 0.75)),
+            deadline_days=int(t.get("deadline_days", 15)),
+            name="Vitor",
+        )
+
         try:
             cycle += 1
-            refetch = cycle % 6 == 1  # full refetch ~hourly at 10-min intervals
-            res = fx_timing._run_live_cycle(args, render=False, refetch=refetch)
+            refetch = cycle % 6 == 1  # full refetch ~hourly
+            res = fx_timing._run_live_cycle(
+                args, render=False, refetch=refetch, cache=cache
+            )
             if res.get("ok"):
+                cache = res.get("cache")
                 ts = time.strftime("%H:%M")
                 d = res["decision"]
                 pn = res["probs"]["exchange_now"]
@@ -482,7 +500,22 @@ def _watch_worker(interval_min: int = 5) -> None:
                 log.warning("watch cycle failed — retrying next interval")
         except Exception as e:
             log.warning("watch cycle error: %s — retrying", e)
-        time.sleep(interval_min * 60)
+
+        # Sleep in 10-second chunks so interval changes from the UI
+        # take effect within 10 seconds instead of waiting for the
+        # full previous interval to elapse.
+        for _ in range(interval_min * 6):
+            time.sleep(10)
+            t_new = load_thresholds()
+            new_interval = int(t_new.get("watch_interval_min", cli_interval_min))
+            if new_interval != interval_min:
+                log.info(
+                    "watch interval changed: %d → %d min — applying immediately",
+                    interval_min,
+                    new_interval,
+                )
+                last_interval = new_interval
+                break
 
 
 def main():
@@ -503,7 +536,6 @@ def main():
     # Always run the watch loop — the server needs fresh data
     watcher = threading.Thread(target=_watch_worker, args=(args.interval,), daemon=True)
     watcher.start()
-    log.info("watch thread started — interval=%d min", args.interval)
 
     ui_dir = os.path.join(os.path.dirname(__file__), "ui")
     vite_proc = None
