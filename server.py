@@ -208,6 +208,8 @@ class CambioHandler(SimpleHTTPRequestHandler):
             self._json(load_thresholds())
         elif self.path == "/api/notifier":
             self._json(_notifier_status())
+        elif self.path == "/api/ibov":
+            self._json(_ibov_data())
         elif self.path == "/api/dashboard":
             entries = journal.all_entries()
             last = entries[0] if entries else None
@@ -396,6 +398,40 @@ def _notifier_status() -> dict:
         "has_token": bool(token),
         "has_chat_id": bool(chat_id),
     }
+
+
+def _ibov_data() -> dict:
+    """Fetch live IBOVESPA data from Yahoo Finance."""
+    import yfinance as yf
+
+    try:
+        ticker = yf.Ticker("^BVSP")
+        hist = ticker.history(period="1mo", interval="1d", auto_adjust=True)
+        if hist.empty:
+            raise ValueError("no history data")
+
+        price = float(hist["Close"].iloc[-1])
+        prev_close = float(hist["Close"].iloc[-2]) if len(hist) > 1 else price
+
+        sparkline = []
+        for idx, row in hist.iterrows():
+            sparkline.append(
+                {"d": idx.strftime("%d/%m"), "v": round(float(row["Close"]))}
+            )
+
+        change = price - prev_close
+        change_pct = (change / prev_close * 100) if prev_close else 0.0
+        return {
+            "ok": True,
+            "price": round(price),
+            "prev_close": round(prev_close),
+            "change": round(change, 2),
+            "change_pct": round(change_pct, 2),
+            "sparkline": sparkline,
+        }
+    except Exception as e:
+        log.warning("ibov fetch error: %s", e)
+        return {"ok": False, "error": str(e)}
 
 
 def _entry_dict(e: journal.Entry) -> dict:

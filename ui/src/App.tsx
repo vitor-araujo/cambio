@@ -73,6 +73,21 @@ interface DashboardData {
   recent_alerts: JournalEntry[];
 }
 
+interface IbovPoint {
+  d: string;
+  v: number;
+}
+
+interface IbovData {
+  ok: boolean;
+  price?: number;
+  prev_close?: number;
+  change?: number;
+  change_pct?: number;
+  sparkline?: IbovPoint[];
+  error?: string;
+}
+
 type Tab = "dashboard" | "history" | "alerts" | "phone" | "thresholds" | "cli";
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -435,21 +450,117 @@ function ConfirmDialog({
   );
 }
 
+// ── ibov ──────────────────────────────────────────────────────────────────────
+
+function IbovMetric() {
+  const [ibov, setIbov] = useState<IbovData | null>(null);
+
+  const load = useCallback(async () => {
+    try {
+      setIbov(await fetchJson<IbovData>("/ibov"));
+    } catch {
+      /* silent */
+    }
+  }, []);
+
+  useEffect(() => {
+    load();
+    const id = setInterval(load, 60_000);
+    return () => clearInterval(id);
+  }, [load]);
+
+  if (!ibov || !ibov.ok) {
+    return (
+      <div className="metric">
+        <div className="metric-label">IBOV</div>
+        <div className="metric-value">&mdash;</div>
+      </div>
+    );
+  }
+
+  const isUp = (ibov.change ?? 0) >= 0;
+  const arrow = isUp ? "\u2191" : "\u2193";
+  const pct = ibov.change_pct ?? 0;
+  const spark = ibov.sparkline ?? [];
+
+  const fmtNum = (n: number) =>
+    n.toLocaleString("pt-BR", { maximumFractionDigits: 0 });
+
+  // mini sparkline SVG
+  const W = 120,
+    H = 32;
+  const vals = spark.map((p) => p.v);
+  const mn = Math.min(...vals);
+  const mx = Math.max(...vals);
+  const range = mx - mn || 1;
+  const pts = spark.map((p, i) => {
+    const x = spark.length > 1 ? (i / (spark.length - 1)) * W : W / 2;
+    const y = 2 + (1 - (p.v - mn) / range) * (H - 4);
+    return `${x},${y}`;
+  });
+  const line = pts.join(" ");
+  const fill =
+    spark.length > 1
+      ? `M${pts[0]} L${pts.slice(1).join(" L")} L${W},${H} L0,${H} Z`
+      : "";
+
+  const color = isUp ? "var(--green)" : "var(--red)";
+
+  return (
+    <div className="metric metric-ibov">
+      <div className="metric-label">
+        IBOV{" "}
+        <span className={`ibov-badge ${isUp ? "ibov-up" : "ibov-down"}`}>
+          {arrow} {pct >= 0 ? "+" : ""}
+          {pct.toFixed(2)}%
+        </span>
+      </div>
+      <div className="metric-value">{fmtNum(ibov.price ?? 0)}</div>
+      {spark.length > 2 && (
+        <svg
+          className="ibov-spark"
+          viewBox={`0 0 ${W} ${H}`}
+          preserveAspectRatio="none"
+          width="100%"
+          height={H}
+        >
+          <defs>
+            <linearGradient id="ig" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor={color} stopOpacity="0.3" />
+              <stop offset="100%" stopColor={color} stopOpacity="0" />
+            </linearGradient>
+          </defs>
+          <path d={fill} fill="url(#ig)" />
+          <polyline
+            points={line}
+            fill="none"
+            stroke={color}
+            strokeWidth={1.5}
+            strokeLinejoin="round"
+            strokeLinecap="round"
+          />
+        </svg>
+      )}
+      <div className="ibov-prev">prev {fmtNum(ibov.prev_close ?? 0)}</div>
+    </div>
+  );
+}
+
 // ── dashboard ────────────────────────────────────────────────────────────────
 
 function Dashboard({ data }: { data: DashboardData }) {
-  const { state, thresholds, recent_signals, total_signals, total_alerts } =
-    data;
+  const { state, thresholds, recent_signals, total_alerts } = data;
   const anchor = (state as Record<string, number | undefined>).anchor_rate;
   const lastRate =
     recent_signals[0]?.rate_live || recent_signals[0]?.rate_signal;
 
   const lastDecision = recent_signals[0];
   const watchIntervalSec = (thresholds.watch_interval_min || 5) * 60;
+  const [chartRange, setChartRange] = useState<number>(30);
 
-  // Chart data: last 30 entries.
+  // Chart data: last N entries.
   const chartRaw = [...recent_signals]
-    .slice(0, 30)
+    .slice(0, chartRange)
     .reverse()
     .map((e) => {
       const d = new Date(e.ts);
@@ -484,9 +595,6 @@ function Dashboard({ data }: { data: DashboardData }) {
   const pMin = Math.min(...pVals);
   const pMax = Math.max(...pVals);
   const pSpread = pMax - pMin || 20;
-  const pLower = Math.max(0, pMin - pSpread * 0.6);
-  const pUpper = Math.min(100, pMax + pSpread * 0.6);
-
   return (
     <>
       {/* Broker button */}
@@ -524,10 +632,7 @@ function Dashboard({ data }: { data: DashboardData }) {
 
       {/* metrics - only what matters */}
       <div className="metric-grid">
-        <div className="metric">
-          <div className="metric-label">sinais</div>
-          <div className="metric-value">{total_signals}</div>
-        </div>
+        <IbovMetric />
         <div className="metric">
           <div className="metric-label">alertas</div>
           <div
@@ -551,76 +656,88 @@ function Dashboard({ data }: { data: DashboardData }) {
       {/* chart */}
       {chartData.length > 0 && (
         <div className="section">
-          <h2>Evolucao</h2>
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              marginBottom: "1rem",
+            }}
+          >
+            <h2 style={{ marginBottom: 0 }}>Evolucao</h2>
+            <div className="chart-range">
+              {[10, 20, 30, 50].map((n) => (
+                <button
+                  key={n}
+                  className={`chart-range-btn ${chartRange === n ? "active" : ""}`}
+                  onClick={() => setChartRange(n)}
+                >
+                  {n}
+                </button>
+              ))}
+            </div>
+          </div>
           <div className="card" style={{ paddingBottom: "0.25rem" }}>
             <div className="chart-legend">
               <div className="chart-legend-item">
                 <span
                   className="chart-legend-swatch"
                   style={{ background: "var(--text-dim)" }}
-                />{" "}
+                />
                 USD/BRL
               </div>
               <div className="chart-legend-item">
-                <span style={{ display: "inline-flex", gap: 1 }}>
+                <span style={{ display: "inline-flex", gap: 3 }}>
                   <span
-                    style={{
-                      width: 6,
-                      height: 6,
-                      borderRadius: "50%",
-                      background: "#f87171",
-                      display: "inline-block",
-                    }}
+                    className="chart-legend-dot"
+                    style={{ background: "#f87171" }}
                   />
                   <span
-                    style={{
-                      width: 6,
-                      height: 6,
-                      borderRadius: "50%",
-                      background: "#fbbf24",
-                      display: "inline-block",
-                    }}
+                    className="chart-legend-dot"
+                    style={{ background: "#fbbf24" }}
                   />
                   <span
-                    style={{
-                      width: 6,
-                      height: 6,
-                      borderRadius: "50%",
-                      background: "#34d399",
-                      display: "inline-block",
-                    }}
+                    className="chart-legend-dot"
+                    style={{ background: "var(--blue)" }}
                   />
                 </span>
-                p(agora) &lt;40 / 40-50 / &gt;=50%
+                p(agora)
               </div>
             </div>
             <ResponsiveContainer width="100%" height={220}>
               <ComposedChart
                 data={chartData}
-                margin={{ top: 4, right: 8, left: 0, bottom: 0 }}
+                margin={{ top: 4, right: 8, left: -10, bottom: 0 }}
               >
-                <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+                <CartesianGrid
+                  strokeDasharray="3 3"
+                  stroke="var(--border)"
+                  vertical={false}
+                />
                 <XAxis
                   dataKey="tick"
-                  tick={{ fill: "var(--text-dim)", fontSize: 9 }}
+                  tick={{ fill: "var(--text-faint)", fontSize: 10 }}
                   tickLine={false}
+                  axisLine={false}
                 />
                 <YAxis
                   yAxisId="rate"
                   orientation="left"
-                  tick={{ fill: "var(--text-dim)", fontSize: 9 }}
+                  tick={{ fill: "var(--text-dim)", fontSize: 10 }}
                   tickLine={false}
-                  axisLine={{ stroke: "var(--border)" }}
+                  axisLine={false}
                   domain={["auto", "auto"]}
-                  tickFormatter={(v: number) => `R$${v.toFixed(2)}`}
+                  tickFormatter={(v: number) => v.toFixed(2)}
+                  interval="preserveStartEnd"
                 />
                 <YAxis
                   yAxisId="pct"
                   orientation="right"
-                  tick={{ fill: "#34d399", fontSize: 9 }}
+                  tick={{ fill: "var(--text-dim)", fontSize: 10 }}
                   tickLine={false}
-                  axisLine={{ stroke: "var(--border)" }}
-                  domain={[pLower, pUpper]}
+                  axisLine={false}
+                  domain={[0, 100]}
+                  ticks={[0, 25, 50, 75, 100]}
                   tickFormatter={(v: number) => `${v}%`}
                 />
                 <Tooltip
@@ -632,50 +749,57 @@ function Dashboard({ data }: { data: DashboardData }) {
                     fontFamily: "var(--font-geist-mono), monospace",
                   }}
                   labelFormatter={(label: string) => label || "\u2014"}
+                  formatter={(value: number, name: string) => [
+                    name === "rate"
+                      ? `R$ ${value.toFixed(4)}`
+                      : `${value.toFixed(1)}%`,
+                    name === "rate" ? "USD/BRL" : "p(agora)",
+                  ]}
                 />
                 <ReferenceArea
                   yAxisId="pct"
                   y1={0}
                   y2={40}
                   fill="#f87171"
-                  fillOpacity={0.06}
+                  fillOpacity={0.04}
                 />
                 <ReferenceArea
                   yAxisId="pct"
                   y1={40}
                   y2={50}
                   fill="#fbbf24"
-                  fillOpacity={0.06}
+                  fillOpacity={0.04}
                 />
                 <ReferenceArea
                   yAxisId="pct"
                   y1={50}
                   y2={100}
-                  fill="#34d399"
-                  fillOpacity={0.06}
+                  fill="var(--blue)"
+                  fillOpacity={0.04}
                 />
                 <Bar
                   yAxisId="rate"
                   dataKey="rate"
-                  fill="#52525b"
-                  fillOpacity={0.85}
+                  fill="var(--text-faint)"
+                  fillOpacity={0.4}
                   radius={[2, 2, 0, 0]}
-                  barSize={9}
-                  name="USD/BRL"
+                  barSize={8}
+                  name="rate"
                 />
                 <Line
                   yAxisId="pct"
-                  type="monotone"
+                  type="natural"
                   dataKey="p_now"
-                  stroke="#8b8a87"
-                  strokeWidth={2.5}
+                  stroke="var(--text-dim)"
+                  strokeWidth={2}
                   dot={(props: any) => {
                     const { cx, cy, payload } = props;
                     const v = payload.p_now;
                     const fill =
-                      v >= 50 ? "#34d399" : v >= 40 ? "#fbbf24" : "#f87171";
+                      v >= 50 ? "var(--blue)" : v >= 40 ? "#fbbf24" : "#f87171";
                     return (
                       <circle
+                        key={`dot-${payload.ts}`}
                         cx={cx}
                         cy={cy}
                         r={4}
@@ -685,7 +809,13 @@ function Dashboard({ data }: { data: DashboardData }) {
                       />
                     );
                   }}
-                  name="p(agora)"
+                  activeDot={{
+                    r: 6,
+                    fill: "var(--blue)",
+                    stroke: "var(--bg-card)",
+                    strokeWidth: 2,
+                  }}
+                  name="p_now"
                 />
               </ComposedChart>
             </ResponsiveContainer>
