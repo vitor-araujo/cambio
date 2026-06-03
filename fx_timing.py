@@ -1393,22 +1393,28 @@ def _run_live_cycle(
     deadline_days = getattr(args, "deadline_days", DEFAULT_DEADLINE_DAYS)
     deadline_remaining = journal.days_until_deadline(deadline_days)
 
+    # Only show journal/DCA card in stateful modes (watch, explicit deadline)
+    show_state = (
+        getattr(args, "watch", False) or args.deadline_days != DEFAULT_DEADLINE_DAYS
+    )
+
     if render:
-        prev = journal.last_entry()
-        summary = journal.render_summary(prev, rate_live or rate_signal)
-        if summary:
-            print(f"\n  {summary}")
-        if deadline_remaining is not None:
-            usd_chunk = AMOUNT * size_frac
-            print(
-                f"  prazo: {deadline_remaining} dias até execução forçada  ·  "
-                f"sugestão agora: converter {size_frac:.0%} (≈ ${usd_chunk:,.0f})"
-            )
-        else:
-            print(
-                f"  sugestão agora: converter {size_frac:.0%}  ·  "
-                "use --mark-executed após o câmbio para ativar o cronômetro de prazo"
-            )
+        if show_state:
+            prev = journal.last_entry()
+            summary = journal.render_summary(prev, rate_live or rate_signal)
+            if summary:
+                print(f"\n  {summary}")
+            if deadline_remaining is not None:
+                usd_chunk = AMOUNT * size_frac
+                print(
+                    f"  prazo: {deadline_remaining} dias até execução forçada  ·  "
+                    f"sugestão agora: converter {size_frac:.0%} (≈ ${usd_chunk:,.0f})"
+                )
+            else:
+                print(
+                    f"  sugestão agora: converter {size_frac:.0%}  ·  "
+                    "use --mark-executed após o câmbio para ativar o cronômetro de prazo"
+                )
         render_live(sigs, probs, live_fx=live_fx, usdbrl_series=data_live.get("usdbrl"))
 
     notified = False
