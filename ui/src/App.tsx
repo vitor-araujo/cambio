@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import {
   ComposedChart,
   Bar,
@@ -557,6 +557,7 @@ function Dashboard({ data }: { data: DashboardData }) {
   const lastDecision = recent_signals[0];
   const watchIntervalSec = (thresholds.watch_interval_min || 5) * 60;
   const [chartRange, setChartRange] = useState<number>(30);
+  const chartRef = useRef<HTMLDivElement>(null);
 
   // Chart data: last N entries.
   const chartRaw = [...recent_signals]
@@ -590,11 +591,76 @@ function Dashboard({ data }: { data: DashboardData }) {
 
   const chartData = chartRaw.map((d) => ({ ...d, tick: d.label }));
 
-  // Center p(agora) Y-axis.
-  const pVals = chartData.map((d) => d.p_now);
-  const pMin = Math.min(...pVals);
-  const pMax = Math.max(...pVals);
-  const pSpread = pMax - pMin || 20;
+  // ── rate Y-axis: auto domain with ≥ 3-centavo spread ──────────────────
+  const rateVals = chartData.map((d) => d.rate);
+  const rateMin = Math.min(...rateVals);
+  const rateMax = Math.max(...rateVals);
+  const rateSpread = rateMax - rateMin;
+  const MIN_SPREAD = 0.03;
+  const pad = Math.max(0, (MIN_SPREAD - rateSpread) / 2);
+  const defaultRateDomain: [number, number] = [
+    +(rateMin - pad - 0.003).toFixed(4),
+    +(rateMax + pad + 0.003).toFixed(4),
+  ];
+
+  // ── zoom state (null = auto) ──────────────────────────────────────────
+  const [rateDomain, setRateDomain] = useState<[number, number] | null>(null);
+  const [pctDomain, setPctDomain] = useState<[number, number] | null>(null);
+
+  // Reset zoom when the user changes the visible range
+  useEffect(() => {
+    setRateDomain(null);
+    setPctDomain(null);
+  }, [chartRange]);
+
+  const effectiveRateDomain = rateDomain ?? defaultRateDomain;
+  const effectivePctDomain = pctDomain ?? [0, 100];
+
+  // Refs for the wheel handler — avoid stale closures
+  const rateDomainRef = useRef(effectiveRateDomain);
+  rateDomainRef.current = effectiveRateDomain;
+  const pctDomainRef = useRef(effectivePctDomain);
+  pctDomainRef.current = effectivePctDomain;
+  const rateRangeRef = useRef({ min: rateMin, max: rateMax });
+  rateRangeRef.current = { min: rateMin, max: rateMax };
+
+  // ── wheel → zoom the y-axis under the cursor ──────────────────────────
+  useEffect(() => {
+    const el = chartRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const factor = e.deltaY > 0 ? 1.12 : 1 / 1.12;
+      const rect = el.getBoundingClientRect();
+      const isRight = e.clientX - rect.left > rect.width * 0.55;
+
+      if (isRight) {
+        const [lo, hi] = pctDomainRef.current;
+        const center = (lo + hi) / 2;
+        const half = ((hi - lo) / 2) * factor;
+        setPctDomain([
+          Math.max(-5, center - half),
+          Math.min(105, center + half),
+        ]);
+      } else {
+        const [lo, hi] = rateDomainRef.current;
+        const center = (lo + hi) / 2;
+        const half = ((hi - lo) / 2) * factor;
+        const { min, max } = rateRangeRef.current;
+        setRateDomain([
+          Math.max(min - 0.1, center - half),
+          Math.min(max + 0.1, center + half),
+        ]);
+      }
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, []);
+
+  const resetZoom = useCallback(() => {
+    setRateDomain(null);
+    setPctDomain(null);
+  }, []);
   return (
     <>
       {/* Broker button */}
@@ -677,31 +743,57 @@ function Dashboard({ data }: { data: DashboardData }) {
               ))}
             </div>
           </div>
-          <div className="card" style={{ paddingBottom: "0.25rem" }}>
-            <div className="chart-legend">
-              <div className="chart-legend-item">
+          <div
+            ref={chartRef}
+            className="card"
+            style={{ paddingBottom: "0.25rem" }}
+            onDoubleClick={resetZoom}
+          >
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+              }}
+            >
+              <div className="chart-legend">
+                <div className="chart-legend-item">
+                  <span
+                    className="chart-legend-swatch"
+                    style={{ background: "var(--text-dim)" }}
+                  />
+                  USD/BRL
+                </div>
+                <div className="chart-legend-item">
+                  <span style={{ display: "inline-flex", gap: 3 }}>
+                    <span
+                      className="chart-legend-dot"
+                      style={{ background: "#f87171" }}
+                    />
+                    <span
+                      className="chart-legend-dot"
+                      style={{ background: "#fbbf24" }}
+                    />
+                    <span
+                      className="chart-legend-dot"
+                      style={{ background: "var(--blue)" }}
+                    />
+                  </span>
+                  p(agora)
+                </div>
                 <span
-                  className="chart-legend-swatch"
-                  style={{ background: "var(--text-dim)" }}
-                />
-                USD/BRL
-              </div>
-              <div className="chart-legend-item">
-                <span style={{ display: "inline-flex", gap: 3 }}>
-                  <span
-                    className="chart-legend-dot"
-                    style={{ background: "#f87171" }}
-                  />
-                  <span
-                    className="chart-legend-dot"
-                    style={{ background: "#fbbf24" }}
-                  />
-                  <span
-                    className="chart-legend-dot"
-                    style={{ background: "var(--blue)" }}
-                  />
+                  style={{
+                    fontSize: "0.65rem",
+                    color: "var(--text-faint)",
+                    opacity: rateDomain || pctDomain ? 0.6 : 0,
+                    transition: "opacity 0.2s",
+                    cursor: "pointer",
+                  }}
+                  onClick={resetZoom}
+                  title="Double-click chart to reset zoom"
+                >
+                  scroll=zoom · dbl-click=reset
                 </span>
-                p(agora)
               </div>
             </div>
             <ResponsiveContainer width="100%" height={220}>
@@ -726,8 +818,8 @@ function Dashboard({ data }: { data: DashboardData }) {
                   tick={{ fill: "var(--text-dim)", fontSize: 10 }}
                   tickLine={false}
                   axisLine={false}
-                  domain={["auto", "auto"]}
-                  tickFormatter={(v: number) => v.toFixed(2)}
+                  domain={effectiveRateDomain}
+                  tickFormatter={(v: number) => v.toFixed(4)}
                   interval="preserveStartEnd"
                 />
                 <YAxis
@@ -736,8 +828,8 @@ function Dashboard({ data }: { data: DashboardData }) {
                   tick={{ fill: "var(--text-dim)", fontSize: 10 }}
                   tickLine={false}
                   axisLine={false}
-                  domain={[0, 100]}
-                  ticks={[0, 25, 50, 75, 100]}
+                  domain={effectivePctDomain as [number, number]}
+                  allowDataOverflow
                   tickFormatter={(v: number) => `${v}%`}
                 />
                 <Tooltip
