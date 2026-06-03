@@ -114,7 +114,7 @@ python configure.py          # configura o bot (2 min, grátis)
 python configure.py --test   # manda mensagem de teste
 ```
 
-O alerta usa uma "âncora" — o preço vira referência. Se cair, a âncora desce. Se subir além do limite, dispara. Depois a âncora sobe pro novo preço, e você só recebe outro alerta se subir de novo acima do limite.
+O alerta compara o preço atual com a primeira cotação do dia (âncora diária). Se o dólar subir mais que o limite definido em relação a essa âncora, o alerta dispara. A âncora **não** sobe depois do alerta — ela fica fixa o dia todo, então você vê o crescimento real intra-day, mesmo monitorando a cada 1 minuto.
 
 ### 📓 Diário de decisões
 
@@ -236,7 +236,7 @@ Esses valores você pode alterar no dashboard (aba Thresholds) ou pela API:
 | `watch_interval_min` | 5 | A cada quantos minutos o programa busca dados novos |
 | `notify_threshold` | 0.40 | Probabilidade mínima pra abrir alerta no navegador (40%) |
 | `notify_cooldown_hours` | 6 | Horas mínimas entre alertas no navegador |
-| `alert_threshold_pct` | 1.0 | % de alta do dólar pra mandar alerta no Telegram |
+| `alert_threshold_pct` | 1.0 | % de alta intra-day (vs primeira cotação do dia) pra disparar alerta |
 | `alert_cooldown_min` | 5 | Minutos mínimos entre alertas no Telegram |
 | `dca_floor` | 0.25 | Fração mínima que converte por ciclo (25%) |
 | `dca_ceiling` | 0.75 | Fração máxima que converte por ciclo (75%) |
@@ -395,6 +395,8 @@ python configure.py --reset   # clear anchor + cooldown
 2. Run `configure.py`, paste token, send any message to your bot
 3. Done — chat_id is auto-discovered
 
+The alert compares the live rate against the day's first observed rate (intra-day anchor). The anchor stays fixed all day — it never resets after an alert — so intra-day growth is tracked correctly regardless of poll interval.
+
 ### Thresholds (editable in the UI)
 
 | Name | Default | Meaning |
@@ -402,7 +404,7 @@ python configure.py --reset   # clear anchor + cooldown
 | `watch_interval_min` | 5 | Minutes between data collections |
 | `notify_threshold` | 0.40 | Min p(now) to trigger browser alert |
 | `notify_cooldown_hours` | 6 | Hours between browser alerts |
-| `alert_threshold_pct` | 1.0 | % rise vs anchor to trigger phone alert |
+| `alert_threshold_pct` | 1.0 | % intra-day rise (vs day's first rate) to trigger phone alert |
 | `alert_cooldown_min` | 5 | Minutes between phone alerts |
 | `dca_floor` | 0.25 | Min fraction per cycle (25%) |
 | `dca_ceiling` | 0.75 | Max fraction per cycle (75%) |

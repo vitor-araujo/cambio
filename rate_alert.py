@@ -5,8 +5,8 @@ Depends only on the `Notifier` Protocol (DIP), not on any concrete provider.
 Holds the anchor/threshold/cooldown state machine, the message formatter,
 and the .env loader.
 
-State (anchor + last-alert timestamp) persists in `.fx_alert.state` so the
-cooldown and anchor survive watch-loop restarts.
+State (day-anchor + last-alert timestamp) persists in `.fx_alert.state` so the
+cooldown and intra-day reference survive watch-loop restarts.
 """
 
 import json
@@ -75,48 +75,46 @@ def maybe_alert_on_rise(
     state_path: str = STATE_PATH,
 ) -> dict:
     """
-    Fire an alert if rate_now rose >= threshold_pct vs the anchor.
+    Fire an alert if rate_now rose >= threshold_pct vs the day's anchor.
 
-    Anchor logic:
-      - first call ever: anchor = rate_now (no alert)
-      - rate drops below anchor: anchor moves down (tracks the local low)
-      - rate rises >= threshold AND cooldown elapsed: send + anchor jumps to
-        rate_now + cooldown timer resets
+    Intra-day anchor logic:
+      - first call of the day: day anchor = rate_now (no alert)
+      - subsequent calls: alert fires when rate_now >= day_anchor × (1 + threshold_pct/100)
+        AND cooldown has elapsed since the last alert.
+      - day anchor is fixed per day — it NEVER resets after an alert,
+        so intra-day accumulation is tracked correctly regardless of poll interval.
+      - when the date changes, the day anchor resets to the new first rate.
 
     The `notifier` parameter is the only seam between this module and the
     concrete provider — pass any object satisfying the Notifier protocol.
     Defaults to the provider from NOTIFIER_PROVIDER env (or 'telegram').
     """
     state = load_state(state_path)
-    anchor = state.get("anchor_rate")
+    today_str = datetime.now().strftime("%Y-%m-%d")
+    day_anchor = state.get("day_anchor")
+    day_anchor_date = state.get("day_anchor_date")
     last_ts_str = state.get("last_alert_ts")
 
     out = {
         "fired": False,
         "reason": "",
         "delta_pct": 0.0,
-        "anchor": anchor,
+        "anchor": day_anchor,
         "sent_ok": False,
         "error": "",
         "provider": "",
     }
 
-    # bootstrap
-    if anchor is None or anchor <= 0:
-        state["anchor_rate"] = rate_now
+    # bootstrap or new day — reset the intra-day reference
+    if day_anchor is None or day_anchor_date != today_str:
+        state["day_anchor"] = rate_now
+        state["day_anchor_date"] = today_str
         save_state(state, state_path)
-        out.update({"reason": "anchor initialized", "anchor": rate_now})
+        out.update({"reason": f"day anchor set to {rate_now:.4f}", "anchor": rate_now})
         return out
 
-    delta_pct = (rate_now / anchor - 1.0) * 100.0
+    delta_pct = (rate_now / day_anchor - 1.0) * 100.0
     out["delta_pct"] = delta_pct
-
-    # track local low
-    if rate_now < anchor:
-        state["anchor_rate"] = rate_now
-        save_state(state, state_path)
-        out.update({"reason": f"anchor lowered to {rate_now:.4f}", "anchor": rate_now})
-        return out
 
     if delta_pct < threshold_pct:
         out["reason"] = f"delta {delta_pct:+.2f}% < {threshold_pct:.2f}%"
@@ -134,18 +132,17 @@ def maybe_alert_on_rise(
         except ValueError:
             pass
 
-    # fire
+    # fire — day anchor stays fixed so we keep tracking intra-day growth
     n = notifier or get_notifier()
     out["provider"] = n.name
-    ok, info = n.send(_format_message(rate_now, anchor, delta_pct))
+    ok, info = n.send(_format_message(rate_now, day_anchor, delta_pct))
     out["sent_ok"] = ok
     out["fired"] = ok
 
     if ok:
-        state["anchor_rate"] = rate_now
         state["last_alert_ts"] = datetime.now().isoformat(timespec="seconds")
         save_state(state, state_path)
-        out.update({"anchor": rate_now, "reason": "alert sent"})
+        out.update({"anchor": day_anchor, "reason": "alert sent"})
     else:
         out.update({"error": info, "reason": f"send failed: {info}"})
 
@@ -157,7 +154,7 @@ def _format_message(rate_now: float, anchor: float, delta_pct: float) -> str:
     ts = datetime.now().strftime("%d/%m %H:%M")
     return (
         f"🇧🇷 cambio · USD/BRL · {ts}\n\n"
-        f"R$ {rate_now:.4f}  ({delta_pct:+.2f}% vs R$ {anchor:.4f})\n\n"
+        f"R$ {rate_now:.4f}  ({delta_pct:+.2f}% intra-day vs R$ {anchor:.4f})\n\n"
         f"Janela de oportunidade — confere o sinal antes de converter.\n"
         f"https://higlobe.com/webapp/en/login"
     )
