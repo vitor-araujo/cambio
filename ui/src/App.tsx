@@ -548,6 +548,100 @@ function IbovMetric() {
 
 // ── dashboard ────────────────────────────────────────────────────────────────
 
+function UsdbrlMetric() {
+  const [usdbrl, setUsdbrl] = useState<IbovData | null>(null);
+
+  const load = useCallback(async () => {
+    try {
+      setUsdbrl(await fetchJson<IbovData>("/usdbrl"));
+    } catch {
+      /* silent */
+    }
+  }, []);
+
+  useEffect(() => {
+    load();
+    const id = setInterval(load, 120_000);
+    return () => clearInterval(id);
+  }, [load]);
+
+  if (!usdbrl || !usdbrl.ok) {
+    return (
+      <div className="metric">
+        <div className="metric-label">USD/BRL</div>
+        <div className="metric-value">&mdash;</div>
+      </div>
+    );
+  }
+
+  const isUp = (usdbrl.change ?? 0) < 0;
+  const arrow = isUp ? "↑" : "↓";
+  const pct = usdbrl.change_pct ?? 0;
+  const spark = usdbrl.sparkline ?? [];
+
+  const W = 120,
+    H = 32;
+  const vals = spark.map((p) => p.v);
+  const mn = Math.min(...vals);
+  const mx = Math.max(...vals);
+  const range = mx - mn || 0.01;
+  const pts = spark.map((p, i) => {
+    const x = spark.length > 1 ? (i / (spark.length - 1)) * W : W / 2;
+    const y = 2 + (1 - (p.v - mn) / range) * (H - 4);
+    return `${x},${y}`;
+  });
+  const line = pts.join(" ");
+  const fill =
+    spark.length > 1
+      ? `M${pts[0]} L${pts.slice(1).join(" L")} L${W},${H} L0,${H} Z`
+      : "";
+
+  // USD/BRL colour logic is inverted: falling rate = BRL stronger = GOOD
+  const color = isUp ? "var(--green)" : "var(--red)";
+  const fmt = (n: number) => n.toFixed(4).replace(/\.?0+$/, "");
+
+  return (
+    <div className="metric metric-ibov">
+      <div className="metric-label">
+        Dólar{" "}
+        <span className={`ibov-badge ${isUp ? "ibov-up" : "ibov-down"}`}>
+          {arrow} {pct >= 0 ? "+" : ""}
+          {pct.toFixed(2)}%
+        </span>
+      </div>
+      <div className="metric-value">R$ {fmt(usdbrl.price ?? 0)}</div>
+      {spark.length > 2 && (
+        <svg
+          className="ibov-spark"
+          viewBox={`0 0 ${W} ${H}`}
+          preserveAspectRatio="none"
+          width="100%"
+          height={H}
+        >
+          <defs>
+            <linearGradient id="ug" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor={color} stopOpacity="0.3" />
+              <stop offset="100%" stopColor={color} stopOpacity="0" />
+            </linearGradient>
+          </defs>
+          <path d={fill} fill="url(#ug)" />
+          <polyline
+            points={line}
+            fill="none"
+            stroke={color}
+            strokeWidth={1.5}
+            strokeLinejoin="round"
+            strokeLinecap="round"
+          />
+        </svg>
+      )}
+      <div className="ibov-prev">
+        PTAX anterior R$ {fmt(usdbrl.prev_close ?? 0)}
+      </div>
+    </div>
+  );
+}
+
 function Dashboard({ data }: { data: DashboardData }) {
   const { state, thresholds, recent_signals, total_alerts } = data;
   const anchor = (state as Record<string, number | undefined>).anchor_rate;
@@ -699,15 +793,7 @@ function Dashboard({ data }: { data: DashboardData }) {
       {/* metrics - only what matters */}
       <div className="metric-grid">
         <IbovMetric />
-        <div className="metric">
-          <div className="metric-label">alertas</div>
-          <div
-            className="metric-value"
-            style={{ color: total_alerts > 0 ? "var(--amber)" : undefined }}
-          >
-            {total_alerts}
-          </div>
-        </div>
+        <UsdbrlMetric />
         <div className="metric">
           <div className="metric-label">ancora</div>
           <div

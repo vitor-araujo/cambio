@@ -28,6 +28,7 @@ import subprocess
 import sys
 import threading
 import time
+from datetime import date, timedelta
 from http.server import HTTPServer, SimpleHTTPRequestHandler
 from urllib.request import Request, urlopen
 
@@ -210,6 +211,8 @@ class CambioHandler(SimpleHTTPRequestHandler):
             self._json(_notifier_status())
         elif self.path == "/api/ibov":
             self._json(_ibov_data())
+        elif self.path == "/api/usdbrl":
+            self._json(_usdbrl_data())
         elif self.path == "/api/dashboard":
             entries = journal.all_entries()
             last = entries[0] if entries else None
@@ -398,6 +401,54 @@ def _notifier_status() -> dict:
         "has_token": bool(token),
         "has_chat_id": bool(chat_id),
     }
+
+
+def _usdbrl_data() -> dict:
+    """Fetch recent USD/BRL PTAX + sparkline from BCB API."""
+    try:
+        end_dt = date.today()
+        start_dt = end_dt - timedelta(days=90)
+        start = start_dt.strftime("%m-%d-%Y")
+        end = end_dt.strftime("%m-%d-%Y")
+        url = (
+            "https://olinda.bcb.gov.br/olinda/servico/PTAX/versao/v1/odata/"
+            f"CotacaoDolarPeriodo(dataInicial=@dataInicial,dataFinalCotacao=@dataFinalCotacao)"
+            f"?@dataInicial='{start}'&@dataFinalCotacao='{end}'"
+            "&$top=200&$format=json&$select=cotacaoVenda,dataHoraCotacao"
+        )
+        req = Request(url, headers={"User-Agent": "cambio/1.0"})
+        raw = json.loads(urlopen(req, timeout=10).read())
+        records = raw.get("value", [])
+        if not records:
+            raise ValueError("no PTAX data")
+
+        # Last bulletin per day
+        by_date: dict[str, float] = {}
+        for r in records:
+            date_str = r["dataHoraCotacao"][:10]
+            by_date[date_str] = float(r["cotacaoVenda"])
+
+        sparkline: list[dict] = []
+        for d in sorted(by_date)[-50:]:
+            sparkline.append({"d": d[5:], "v": round(by_date[d], 4)})  # "MM-DD"
+
+        vals = [by_date[d] for d in sorted(by_date)]
+        cur = vals[-1] if vals else 0
+        prev = vals[-2] if len(vals) > 1 else cur
+        change = cur - prev
+        change_pct = (change / prev * 100) if prev else 0.0
+
+        return {
+            "ok": True,
+            "price": round(cur, 4),
+            "prev_close": round(prev, 4),
+            "change": round(change, 4),
+            "change_pct": round(change_pct, 2),
+            "sparkline": sparkline,
+        }
+    except Exception as e:
+        log.warning("usdbrl fetch error: %s", e)
+        return {"ok": False, "error": str(e)}
 
 
 def _ibov_data() -> dict:
