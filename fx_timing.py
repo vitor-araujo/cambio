@@ -735,10 +735,40 @@ def _fetch_live_fx() -> Optional[tuple[float, str]]:
     return None
 
 
+_BLOCKS = "▁▂▃▄▅▆▇█"
+
+
+def render_sparkline(series: pd.Series, W: int = 66) -> None:
+    """Render a compact 50-bar price sparkline with unicode block chars."""
+    if series is None or len(series) < 5:
+        return
+    data = series.iloc[-50:]
+    lo, hi = float(data.min()), float(data.max())
+    span = hi - lo
+    if span < 0.01:
+        return
+
+    def _block(v: float, _l=lo, _s=span) -> str:
+        if pd.isna(v):
+            return " "
+        level = max(0, min(7, int((v - _l) / _s * 7)))
+        return _BLOCKS[level]
+
+    line = "".join(_block(float(v)) for v in data.values)
+    cur = float(data.iloc[-1])
+    print()
+    print(f"  USD/BRL  ───  {len(data)}d trend  ───")
+    print(f"  {line}")
+    print(f"  R${lo:.4f} {'─' * (W - 22)} R${hi:.4f}")
+    print(f"  {' ' * ((W - 22) // 2 + 2)}↑ atual R${cur:.4f}")
+    print()
+
+
 def render_live(
     signals: list[Signal],
     probs: dict,
     live_fx: Optional[tuple[float, str]] = None,
+    usdbrl_series: Optional[pd.Series] = None,
 ) -> None:
     rate = next((s.raw for s in signals if s.name == "USD/BRL Level"), None)
     regime = probs.get("regime", 0.0)
@@ -773,7 +803,10 @@ def render_live(
     print(f"  {datetime.now().strftime('%Y-%m-%d  %H:%M')}   ·   {rate_line}")
     print("═" * W)
 
-    print()
+    # Sparkline: compact 50-bar USD/BRL price trend
+    if usdbrl_series is not None and len(usdbrl_series) > 5:
+        render_sparkline(usdbrl_series, W)
+
     print(f"  {_t('trend_regime')}:  {regime_label(regime)}")
     print()
     cols = _t("signals_cols")
@@ -1376,7 +1409,7 @@ def _run_live_cycle(
                 f"  sugestão agora: converter {size_frac:.0%}  ·  "
                 "use --mark-executed após o câmbio para ativar o cronômetro de prazo"
             )
-        render_live(sigs, probs, live_fx=live_fx)
+        render_live(sigs, probs, live_fx=live_fx, usdbrl_series=data_live.get("usdbrl"))
 
     notified = False
     if args.notify:
