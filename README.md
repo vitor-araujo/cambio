@@ -8,7 +8,7 @@
   <p align="center">
     <a href="https://github.com/vitor-araujo/cambio/blob/main/LICENSE"><img alt="MIT" src="https://img.shields.io/badge/license-MIT-22c55e?style=flat-square"></a>
     <img alt="Python 3.10+" src="https://img.shields.io/badge/python-3.10+-4B8BBE?style=flat-square&logo=python&logoColor=white">
-    <img alt="versão 0.7.0" src="https://img.shields.io/badge/version-0.7.0-2563eb?style=flat-square">
+    <img alt="versão 0.7.7" src="https://img.shields.io/badge/version-0.7.7-2563eb?style=flat-square">
     <img alt="sem API key" src="https://img.shields.io/badge/dados-grátis%20·%20sem%20API%20key-f59e0b?style=flat-square">
     <img alt="pt · en" src="https://img.shields.io/badge/lang-pt--BR%20·%20en-6366f1?style=flat-square">
   </p>
@@ -90,7 +90,7 @@ A coleta de dados roda em background. Toda vez que o programa busca novos dados,
 
 ### 🔄 Coleta automática
 
-O `server.py` roda uma thread em background que coleta dados do mercado a cada N minutos (padrão 5). Mudou o intervalo na interface? O programa detecta em até 10 segundos e ajusta.
+O `server.py` roda uma thread em background que **puxa os dados imediatamente ao iniciar** e depois repete a cada N minutos (padrão 5). Mudou o intervalo na interface? O programa detecta em até 10 segundos e ajusta.
 
 ```bash
 python server.py --dev                        # dashboard + coleta a cada 5 min
@@ -344,7 +344,7 @@ python fx_timing.py --watch --notify     # CLI background mode
 * 📊 **Behavior-gap audit** — shows how many alerts you ignored
 * 📡 **Live data** — BCB PTAX, AwesomeAPI, Yahoo, CFTC, SELIC. No API keys
 * 🖥️ **Web dashboard** — charts, thresholds, Telegram config, all in the browser
-* 🟢 **Background collection** — `server.py --dev` fetches data every 5 min automatically
+* 🟢 **Background collection** — `server.py --dev` pulls data immediately on start, then every 5 min
 * 🛎️ **Browser alerts** — HTML page with size card and Higlobe link
 * 📱 **Phone alerts** — Telegram (free) or WhatsApp (via Twilio)
 * 📓 **SQLite journal** — every decision logged, CSV auto-migrated

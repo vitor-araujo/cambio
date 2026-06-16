@@ -533,9 +533,6 @@ def _watch_worker(cli_interval_min: int = 5) -> None:
     """
     import fx_timing
 
-    # Let the server start first
-    time.sleep(3)
-
     cycle = 0
     last_interval = cli_interval_min
     cache = None
