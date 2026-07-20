@@ -18,6 +18,11 @@ All notable changes to cambio are documented here. The project follows
   execution-policy explanation, validation context, and reference sections.
 - Relative asset routing so the static build works from repository subpaths.
 
+### Fixed
+
+- Portfolio navigation now imports the brand mark through Vite's asset pipeline
+  and falls back to a text mark instead of showing a broken-image glyph.
+
 ## [0.8.0] - 2026-07-20
 
 ### Added

@@ -10,10 +10,10 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
+import brandMarkUrl from "./assets/cambio-mark.png";
 
 const API = "/api";
 const portfolioMode = import.meta.env.VITE_PORTFOLIO_MODE === "true";
-const BRAND_MARK = `${import.meta.env.BASE_URL}cambio-mark.png`;
 const REPOSITORY_URL = "https://github.com/vitor-araujo/cambio";
 
 interface Thresholds {
@@ -169,6 +169,12 @@ function dueCopy(days: number, actionNow = false): string {
 
 function Spinner() {
   return <span className="spinner" aria-hidden="true" />;
+}
+
+function BrandMark({ className }: { className: string }) {
+  const [failed, setFailed] = useState(false);
+  if (failed) return <span className={`${className} brand-mark-fallback`} aria-hidden="true">C</span>;
+  return <img className={className} src={brandMarkUrl} alt="" aria-hidden="true" onError={() => setFailed(true)} />;
 }
 
 function StatusDot({ on }: { on: boolean }) {
@@ -634,7 +640,7 @@ function Cli() {
 }
 
 function LoadingView() {
-  return <div className="loading-view"><img className="loading-mark" src={BRAND_MARK} alt="" /><div className="loading-brand">CAMBIO</div><div className="loading-line" /><div className="loading-grid"><span /><span /><span /></div><p>{portfolioMode ? "Preparando o case interativo…" : "Conectando ao feed de execução…"}</p></div>;
+  return <div className="loading-view"><BrandMark className="loading-mark" /><div className="loading-brand">CAMBIO</div><div className="loading-line" /><div className="loading-grid"><span /><span /><span /></div><p>{portfolioMode ? "Preparando o case interativo…" : "Conectando ao feed de execução…"}</p></div>;
 }
 
 function PortfolioNotice() {
@@ -774,7 +780,7 @@ export default function App() {
   return (
     <div className="app-shell">
       <aside className="rail">
-        <div className="brand"><img className="brand-mark" src={BRAND_MARK} alt="" /><div><strong>cambio</strong><span>{portfolioMode ? "portfolio case" : "execution desk"}</span></div></div>
+        <div className="brand"><BrandMark className="brand-mark" /><div><strong>cambio</strong><span>{portfolioMode ? "portfolio case" : "execution desk"}</span></div></div>
         <nav aria-label="Navegação principal">
           {navigation.map((item) => <button key={item.id} className={tab === item.id ? "active" : ""} onClick={() => setTab(item.id)}><i>{item.glyph}</i><span>{item.label}</span>{item.id === "alerts" && dashboard?.total_alerts ? <b>{dashboard.total_alerts}</b> : null}</button>)}
         </nav>

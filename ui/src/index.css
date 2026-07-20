@@ -121,6 +121,17 @@ a {
   object-fit: contain;
 }
 
+.brand-mark-fallback {
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(225, 162, 93, 0.42);
+  border-radius: 50%;
+  color: var(--copper);
+  font-family: "Geist Mono", monospace;
+  font-size: 15px;
+  font-weight: 720;
+}
+
 .brand div {
   display: flex;
   flex-direction: column;
@@ -1286,6 +1297,10 @@ td.strong { color: var(--ledger); font-weight: 600; }
   height: 68px;
   margin-bottom: 18px;
   object-fit: contain;
+}
+
+.loading-mark.brand-mark-fallback {
+  font-size: 22px;
 }
 
 .loading-brand {
