@@ -439,7 +439,7 @@ def build_signals(
     # The useful signal is the TREND of 6L:
     #   Rising 6L → institutions net-buying BRL futures → USD/BRL declining trend → NOW
     #   Falling 6L → institutions net-selling BRL → USD/BRL rising trend → WAIT
-    if "six_l" in data:
+    if "six_l" in data and not data["six_l"].empty:
         six_l = data["six_l"]
         mom = z_momentum(six_l)
         cur_6l = float(six_l.iloc[-1])
@@ -480,7 +480,7 @@ def build_signals(
     # Net LONG  EUR → specs are short USD → USD expected to weaken → USD/BRL falls → NOW
     # Net SHORT EUR → specs are long  USD → USD expected to strengthen → USD/BRL rises → WAIT
     # Published weekly. Forward-filled to daily frequency.
-    if "cot_eur" in data:
+    if "cot_eur" in data and not data["cot_eur"].empty:
         cot = data["cot_eur"]
 
         cur_net = float(cot.iloc[-1])

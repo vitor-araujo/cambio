@@ -266,13 +266,13 @@ def render_alert(
     """Write the alert HTML to disk and return its absolute path."""
     rows = "\n    ".join(_signal_row(n, s) for n, s in top_signals)
     if deadline_remaining is None:
-        deadline_text = "sem prazo ativo — marca o câmbio com --mark-executed"
+        deadline_text = "registre a tranche depois do câmbio para iniciar o próximo ciclo"
     elif deadline_remaining <= 0:
-        deadline_text = "prazo encerrado — câmbio forçado hoje"
+        deadline_text = "janela aberta — execute a tranche prevista hoje"
     elif deadline_remaining <= 3:
-        deadline_text = f"⚠ apenas {deadline_remaining} dia(s) até execução forçada"
+        deadline_text = f"⚠ próxima tranche em até {deadline_remaining} dia(s)"
     else:
-        deadline_text = f"{deadline_remaining} dias até execução forçada"
+        deadline_text = f"próxima tranche em até {deadline_remaining} dias"
 
     html_out = _TEMPLATE.format(
         name=html.escape(name),

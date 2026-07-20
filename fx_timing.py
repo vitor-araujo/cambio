@@ -13,7 +13,7 @@ USD/BRL Exchange Timing Model
 pip install yfinance pandas numpy
 """
 
-__version__ = "0.7.3"
+__version__ = "0.8.0"
 
 import argparse
 import io
@@ -36,6 +36,7 @@ import notify
 import rate_alert
 from notifiers import DEFAULT_PROVIDER, ENV_VAR, available, get_notifier
 from signals import Signal, build_signals
+from terminal_ui import WatchConsole, WatchSnapshot, startup_banner
 
 warnings.filterwarnings("ignore")
 
@@ -184,6 +185,10 @@ BACKTEST_START = "2022-01-01"
 ORACLE_HORIZON = 14  # days ahead for correctness evaluation
 ORACLE_THRESH = 0.003  # 0.3 % move to call it directional (next-check-date oracle)
 DEFAULT_DEADLINE_DAYS = 15  # forced execution window — 2 decisions/month avg
+DEFAULT_CADENCE_DAYS = 4  # maximum days between small execution tranches
+DEFAULT_OPPORTUNITY_WINDOW_DAYS = 3  # start accepting good signals on day 3
+OPPORTUNITY_THRESHOLD_HIGH = 0.80  # implies a 35th-percentile hurdle on day three
+OPPORTUNITY_THRESHOLD_DUE = 0.20  # urgency floor immediately before forced execution
 AMOUNT = 10_000  # USD per scenario
 REGIME_STRENGTH = 0.55  # how hard the regime filter shifts probabilities
 DEFAULT_SPREAD_BPS = 50  # 0.50 % effective spread (Wise-class fintech, pre-IOF)
@@ -196,7 +201,7 @@ NOTIFY_COOLDOWN_HOURS = 6  # don't re-open the alert within this window
 
 # ── Vanguard discipline (DCA + CMH) ───────────────────────────────────────────────────────
 DEFAULT_DCA_FLOOR = 0.25  # minimum fraction to convert every cycle (regret cap)
-DEFAULT_DCA_CEILING = 1.00  # maximum fraction (only fires on high-conviction NOW)
+DEFAULT_DCA_CEILING = 0.50  # keep recurring executions in deliberately small tranches
 SIZE_PIVOT_LOW = 0.30  # p_now ≤ this → floor only
 SIZE_PIVOT_HIGH = 0.70  # p_now ≥ this → ceiling
 CMH_SAFETY_MULTIPLIER = 2.0  # edge must clear 2× spread to be "real" (Bogle)
@@ -612,17 +617,159 @@ def decide(
     ceiling: float = DEFAULT_DCA_CEILING,
 ) -> str:
     """
-    Categorical label derived from the sizing fraction:
-      NOW   — size ≥ 0.70 (high conviction → convert most/all)
-      SPLIT — 0.40 ≤ size < 0.70 (mixed signals, partial)
-      WAIT  — size < 0.40 (floor-only, mandatory DCA)
+    Directional label for backtests and one-shot analysis.
+
+    Live execution uses ``plan_execution`` so this classifier cannot postpone a
+    scheduled tranche. Keeping classification independent from sizing avoids
+    the old bug where a non-zero 25% tranche was still labelled WAIT.
     """
-    s = size(probs, floor, ceiling)
-    if s >= 0.70:
+    del floor, ceiling
+    pn = float(probs["exchange_now"])
+    if pn >= 0.50:
         return "exchange_now"
-    if s >= 0.40:
+    if pn >= 0.35:
         return "split"
     return "wait"
+
+
+@dataclass(frozen=True)
+class ExecutionPlan:
+    """Cadence-aware instruction layered on top of the directional model."""
+
+    decision: str
+    action_now: bool
+    size_frac: float
+    trigger: str
+    reason: str
+    cadence_days: int
+    days_since_execution: Optional[float]
+    days_to_due: float
+    opportunity_score: float
+    opportunity_threshold: float
+    window_opens_at: datetime
+    next_due_at: datetime
+
+    def as_dict(self) -> dict:
+        return {
+            "decision": self.decision,
+            "action_now": self.action_now,
+            "size_frac": self.size_frac,
+            "trigger": self.trigger,
+            "reason": self.reason,
+            "cadence_days": self.cadence_days,
+            "days_since_execution": self.days_since_execution,
+            "days_to_due": self.days_to_due,
+            "opportunity_score": self.opportunity_score,
+            "opportunity_threshold": self.opportunity_threshold,
+            "window_opens_at": self.window_opens_at.isoformat(),
+            "next_due_at": self.next_due_at.isoformat(),
+        }
+
+
+def plan_execution(
+    probs: dict,
+    last_executed_at: Optional[datetime],
+    *,
+    now: Optional[datetime] = None,
+    floor: float = DEFAULT_DCA_FLOOR,
+    ceiling: float = DEFAULT_DCA_CEILING,
+    cadence_days: int = DEFAULT_CADENCE_DAYS,
+    opportunity_window_days: int = DEFAULT_OPPORTUNITY_WINDOW_DAYS,
+    opportunity_score: Optional[float] = None,
+) -> ExecutionPlan:
+    """Turn a noisy probability into a bounded, recurring execution window.
+
+    The signal may pull a tranche forward, but it may never postpone one past
+    ``cadence_days``. The hurdle decays as time is consumed, which prevents the
+    system from waiting indefinitely for an unobservable perfect price.
+    """
+    now = now or datetime.now()
+    cadence_days = max(1, int(cadence_days))
+    opportunity_window_days = max(1, min(int(opportunity_window_days), cadence_days))
+    size_frac = size(probs, floor, ceiling)
+    p_now = float(probs["exchange_now"])
+    quality = float(np.clip(p_now if opportunity_score is None else opportunity_score, 0.0, 1.0))
+
+    if last_executed_at is None:
+        return ExecutionPlan(
+            decision="exchange_now",
+            action_now=True,
+            size_frac=size_frac,
+            trigger="initial_fill",
+            reason="No execution is recorded. Start the tranche schedule now.",
+            cadence_days=cadence_days,
+            days_since_execution=None,
+            days_to_due=0.0,
+            opportunity_score=quality,
+            opportunity_threshold=OPPORTUNITY_THRESHOLD_DUE,
+            window_opens_at=now,
+            next_due_at=now,
+        )
+
+    elapsed_days = max(0.0, (now - last_executed_at).total_seconds() / 86_400.0)
+    progress = min(1.0, elapsed_days / cadence_days)
+    hurdle = OPPORTUNITY_THRESHOLD_HIGH - progress * (
+        OPPORTUNITY_THRESHOLD_HIGH - OPPORTUNITY_THRESHOLD_DUE
+    )
+    window_opens_at = last_executed_at + timedelta(days=opportunity_window_days)
+    next_due_at = last_executed_at + timedelta(days=cadence_days)
+    days_to_due = max(0.0, (next_due_at - now).total_seconds() / 86_400.0)
+
+    cadence_due = elapsed_days >= cadence_days
+    window_open = now >= window_opens_at
+    signal_opportunity = window_open and quality >= hurdle
+    action_now = cadence_due or signal_opportunity
+
+    if cadence_due:
+        trigger = "cadence_due"
+        reason = f"The {cadence_days}-day limit is reached; execute the scheduled tranche."
+    elif signal_opportunity:
+        trigger = "opportunity_window"
+        reason = "The execution window is open and the signal cleared its declining hurdle."
+    elif window_open:
+        trigger = "window_open"
+        reason = "The window is open; wait only until the signal improves or the cadence limit arrives."
+    else:
+        trigger = "cadence_building"
+        reason = "The prior tranche is fresh; preserve optionality until the next execution window."
+
+    return ExecutionPlan(
+        decision="exchange_now" if action_now else "wait",
+        action_now=action_now,
+        size_frac=size_frac,
+        trigger=trigger,
+        reason=reason,
+        cadence_days=cadence_days,
+        days_since_execution=elapsed_days,
+        days_to_due=days_to_due,
+        opportunity_score=quality,
+        opportunity_threshold=hurdle,
+        window_opens_at=window_opens_at,
+        next_due_at=next_due_at,
+    )
+
+
+def execution_quality(probs: dict, usdbrl: pd.Series) -> float:
+    """Score how attractive the current USD sale is inside a short window.
+
+    The directional model sizes the tranche; it does not time this short window.
+    Current USD/BRL rank over 20 sessions answers the user's actual execution
+    question: is this a comparatively good BRL payout? Keeping the selector to
+    one observable feature makes it auditable and avoids false precision.
+    """
+    clean = usdbrl.dropna()
+    p_now = float(probs["exchange_now"])
+    if len(clean) < 5:
+        return p_now
+
+    def percentile_rank(lookback: int) -> float:
+        sample = clean.iloc[-min(lookback, len(clean)) :]
+        current = float(sample.iloc[-1])
+        below = float((sample < current).sum())
+        equal = float((sample == current).sum())
+        return (below + 0.5 * equal) / len(sample)
+
+    return float(np.clip(percentile_rank(20), 0.0, 1.0))
 
 
 # ── Live Rendering ────────────────────────────────────────────────────────────
@@ -769,6 +916,7 @@ def render_live(
     probs: dict,
     live_fx: Optional[tuple[float, str]] = None,
     usdbrl_series: Optional[pd.Series] = None,
+    execution_plan: Optional[ExecutionPlan] = None,
 ) -> None:
     rate = next((s.raw for s in signals if s.name == "USD/BRL Level"), None)
     regime = probs.get("regime", 0.0)
@@ -843,7 +991,7 @@ def render_live(
         p = probs[key]
         print(f"  {label:<13}  {p:>5.1%}  [{pbar(p)}]")
 
-    d = decide(probs)
+    d = execution_plan.decision if execution_plan else decide(probs)
     pn = probs["exchange_now"]
     pw = probs["wait"]
     icon, headline, sub = _verdict(d, pn, pw)
@@ -862,6 +1010,23 @@ def render_live(
             line_buf += word + " "
     if line_buf.strip():
         print(f"     {line_buf.rstrip()}")
+
+    if execution_plan:
+        action = "EXECUTE" if execution_plan.action_now else "WATCH"
+        due_hours = execution_plan.days_to_due * 24
+        if execution_plan.action_now:
+            due_label = "window open now"
+        elif due_hours < 24:
+            due_label = f"next tranche due in {due_hours:.0f}h"
+        else:
+            due_label = f"next tranche due in {execution_plan.days_to_due:.1f}d"
+        print()
+        print(
+            f"  {action} {execution_plan.size_frac:.0%}  ·  {due_label}  ·  "
+            f"quality {execution_plan.opportunity_score:.0%} / "
+            f"hurdle {execution_plan.opportunity_threshold:.0%}"
+        )
+        print(f"     {execution_plan.reason}")
 
     print()
     print(f"  {_t('time_title')}")
@@ -1020,6 +1185,190 @@ class Scenario:
     periods_used: int  # number of partial conversions executed
     brl_model: float
     brl_immediate: float
+
+
+@dataclass(frozen=True)
+class CadenceWindow:
+    window_start: date
+    day_three: date
+    day_four: date
+    selected_day: date
+    rate_day_three: float
+    rate_day_four: float
+    selected_rate: float
+    opportunity_score: float
+    opportunity_threshold: float
+
+
+def evaluate_cadence_windows(
+    all_data: dict[str, pd.Series],
+    carry_diff: Optional[pd.Series],
+    cadence_days: int = DEFAULT_CADENCE_DAYS,
+) -> list[CadenceWindow]:
+    """Walk-forward evaluation of the day-three versus day-four selector.
+
+    Each independent four-day window compares exactly one conversion, so spread
+    is identical on both paths and cancels out. This isolates whether execution
+    quality improves the chosen rate without conflating it with trade frequency.
+    """
+    usdbrl = all_data["usdbrl"].dropna().sort_index()
+    del carry_diff  # execution quality is deliberately independent of macro signals
+    if len(usdbrl) < 100:
+        return []
+
+    def market_timestamp_on_or_after(target: date) -> Optional[pd.Timestamp]:
+        position = usdbrl.index.searchsorted(pd.Timestamp(target), side="left")
+        if position >= len(usdbrl.index):
+            return None
+        return pd.Timestamp(usdbrl.index[position])
+
+    start = max(
+        datetime.strptime(BACKTEST_START, "%Y-%m-%d").date(),
+        usdbrl.index[60].date(),
+    )
+    end = usdbrl.index[-1].date() - timedelta(days=cadence_days + 2)
+    windows: list[CadenceWindow] = []
+    anchor = start
+
+    while anchor <= end:
+        opportunity_days = max(
+            1, min(DEFAULT_OPPORTUNITY_WINDOW_DAYS, cadence_days)
+        )
+        ts_three = market_timestamp_on_or_after(
+            anchor + timedelta(days=opportunity_days)
+        )
+        ts_four = market_timestamp_on_or_after(anchor + timedelta(days=cadence_days))
+        anchor += timedelta(days=cadence_days)
+        if ts_three is None or ts_four is None or ts_three == ts_four:
+            continue
+
+        rate_history = usdbrl.loc[:ts_three]
+        neutral_probs = {"exchange_now": 0.5}
+        quality = execution_quality(neutral_probs, rate_history)
+        plan = plan_execution(
+            neutral_probs,
+            datetime.combine(
+                anchor - timedelta(days=cadence_days), datetime.min.time()
+            ),
+            now=ts_three.to_pydatetime(),
+            cadence_days=cadence_days,
+            opportunity_score=quality,
+        )
+        rate_three = float(usdbrl.loc[ts_three])
+        rate_four = float(usdbrl.loc[ts_four])
+        selected_day = ts_three if plan.action_now else ts_four
+        selected_rate = rate_three if plan.action_now else rate_four
+        windows.append(
+            CadenceWindow(
+                window_start=anchor - timedelta(days=cadence_days),
+                day_three=ts_three.date(),
+                day_four=ts_four.date(),
+                selected_day=selected_day.date(),
+                rate_day_three=rate_three,
+                rate_day_four=rate_four,
+                selected_rate=selected_rate,
+                opportunity_score=quality,
+                opportunity_threshold=plan.opportunity_threshold,
+            )
+        )
+
+    return windows
+
+
+def render_cadence_evaluation(windows: list[CadenceWindow]) -> None:
+    if not windows:
+        return
+    picked_three = sum(window.selected_day == window.day_three for window in windows)
+    picked_best = sum(
+        (window.selected_day == window.day_three)
+        == (window.rate_day_three >= window.rate_day_four)
+        for window in windows
+    )
+    vs_day_three_bps = [
+        (window.selected_rate / window.rate_day_three - 1.0) * 10_000
+        for window in windows
+    ]
+    vs_day_four_bps = [
+        (window.selected_rate / window.rate_day_four - 1.0) * 10_000
+        for window in windows
+    ]
+    oracle_regret_bps = [
+        (window.selected_rate / max(window.rate_day_three, window.rate_day_four) - 1.0)
+        * 10_000
+        for window in windows
+    ]
+
+    def edge_vs_day_four(sample: list[CadenceWindow]) -> float:
+        return float(
+            np.mean(
+                [
+                    (window.selected_rate / window.rate_day_four - 1.0) * 10_000
+                    for window in sample
+                ]
+            )
+        )
+
+    def edge_vs_day_three(sample: list[CadenceWindow]) -> float:
+        return float(
+            np.mean(
+                [
+                    (window.selected_rate / window.rate_day_three - 1.0) * 10_000
+                    for window in sample
+                ]
+            )
+        )
+
+    calibration = [window for window in windows if window.day_three.year <= 2024]
+    holdout = [window for window in windows if window.day_three.year >= 2025]
+    holdout_edges = [
+        (window.selected_rate / window.rate_day_four - 1.0) * 10_000
+        for window in holdout
+    ]
+    holdout_ci: Optional[tuple[float, float]] = None
+    if holdout_edges:
+        rng = np.random.default_rng(20260720)
+        samples = rng.choice(
+            np.asarray(holdout_edges),
+            size=(2000, len(holdout_edges)),
+            replace=True,
+        ).mean(axis=1)
+        holdout_ci = (
+            float(np.percentile(samples, 2.5)),
+            float(np.percentile(samples, 97.5)),
+        )
+
+    print()
+    print("  " + "─" * 84)
+    print("\n  3–4 DAY EXECUTION POLICY  ·  walk-forward window selector")
+    print()
+    print(f"  Windows evaluated             {len(windows):>7}")
+    print(f"  Day-three executions          {picked_three / len(windows):>7.1%}")
+    print(f"  Picked better of day 3 / 4    {picked_best / len(windows):>7.1%}")
+    print(f"  Avg edge vs always day 3      {np.mean(vs_day_three_bps):>+7.1f} bps")
+    print(f"  Avg edge vs always day 4      {np.mean(vs_day_four_bps):>+7.1f} bps")
+    print(f"  Avg regret vs hindsight best  {np.mean(oracle_regret_bps):>+7.1f} bps")
+    if calibration and holdout:
+        print()
+        print("  Edge shown vs day 3 / day 4")
+        print(
+            f"  Pre-2025 calibration          {edge_vs_day_three(calibration):>+7.1f} /"
+            f" {edge_vs_day_four(calibration):>+6.1f} bps"
+        )
+        print(
+            f"  2025+ holdout                 {edge_vs_day_three(holdout):>+7.1f} /"
+            f" {edge_vs_day_four(holdout):>+6.1f} bps"
+        )
+        if holdout_ci:
+            print(
+                f"  Holdout bootstrap 95% CI      [{holdout_ci[0]:+.1f}, {holdout_ci[1]:+.1f}] bps"
+            )
+            status = "VALIDATED VS DAY 4" if holdout_ci[0] > 0 else "NOT PROVEN"
+            print(f"  Statistical status            {status:>20}")
+    print(
+        "  Note: one trade per window; identical spread cancels. "
+        "This measures selection, not guaranteed alpha."
+    )
+    print()
 
 
 def _max_wait_periods(check_days: tuple[int, ...], deadline_days: int) -> int:
@@ -1280,8 +1629,7 @@ def _print_fetch_status(data: dict[str, pd.Series]) -> None:
 
 def _build_journal_entry(
     probs: dict,
-    decision: str,
-    size_frac: float,
+    plan: ExecutionPlan,
     rate_signal: float,
     rate_live: Optional[float],
     notified: bool,
@@ -1290,7 +1638,7 @@ def _build_journal_entry(
         ts=datetime.now(),
         rate_signal=rate_signal,
         rate_live=rate_live,
-        decision=decision,
+        decision=plan.decision,
         p_now=probs["exchange_now"],
         p_split=probs["split"],
         p_wait=probs["wait"],
@@ -1298,7 +1646,13 @@ def _build_journal_entry(
         agreement=probs["agreement"],
         regime=probs.get("regime", 0.0),
         notified=notified,
-        size=size_frac,
+        size=plan.size_frac,
+        trigger=plan.trigger,
+        reason=plan.reason,
+        cadence_days=plan.cadence_days,
+        days_to_due=plan.days_to_due,
+        opportunity_score=plan.opportunity_score,
+        opportunity_threshold=plan.opportunity_threshold,
     )
 
 
@@ -1310,6 +1664,7 @@ def _maybe_notify(
     deadline_remaining: Optional[int],
     live_fx: Optional[tuple[float, str]],
     user_name: str,
+    force: bool = False,
 ) -> bool:
     """Fire the browser alert when conviction is high and cooldown elapsed."""
     if not journal.should_notify(
@@ -1317,6 +1672,7 @@ def _maybe_notify(
         probs["exchange_now"],
         threshold=NOTIFY_THRESHOLD,
         cooldown_hours=NOTIFY_COOLDOWN_HOURS,
+        force=force,
     ):
         return False
 
@@ -1384,14 +1740,24 @@ def _run_live_cycle(
     probs = apply_regime(probs, regime)
     floor = getattr(args, "dca_floor", DEFAULT_DCA_FLOOR)
     ceiling = getattr(args, "dca_ceiling", DEFAULT_DCA_CEILING)
-    decision = decide(probs, floor, ceiling)
-    size_frac = size(probs, floor, ceiling)
+    cadence_days = getattr(args, "cadence_days", DEFAULT_CADENCE_DAYS)
+    last_execution = journal.last_executed()
+    quality = execution_quality(probs, data_live["usdbrl"])
+    plan = plan_execution(
+        probs,
+        last_execution.ts if last_execution else None,
+        floor=floor,
+        ceiling=ceiling,
+        cadence_days=cadence_days,
+        opportunity_score=quality,
+    )
+    decision = plan.decision
+    size_frac = plan.size_frac
 
     rate_signal = float(data_live["usdbrl"].iloc[-1])
     rate_live = float(live_fx[0]) if live_fx else None
 
-    deadline_days = getattr(args, "deadline_days", DEFAULT_DEADLINE_DAYS)
-    deadline_remaining = journal.days_until_deadline(deadline_days)
+    deadline_remaining = int(np.ceil(plan.days_to_due))
 
     # Only show journal/DCA card in stateful modes (watch, explicit deadline)
     show_state = (
@@ -1404,23 +1770,36 @@ def _run_live_cycle(
             summary = journal.render_summary(prev, rate_live or rate_signal)
             if summary:
                 print(f"\n  {summary}")
-            if deadline_remaining is not None:
-                usd_chunk = AMOUNT * size_frac
+            usd_chunk = AMOUNT * size_frac
+            if plan.action_now:
                 print(
-                    f"  prazo: {deadline_remaining} dias até execução forçada  ·  "
-                    f"sugestão agora: converter {size_frac:.0%} (≈ ${usd_chunk:,.0f})"
+                    f"  janela aberta: converter {size_frac:.0%} (≈ ${usd_chunk:,.0f})  ·  "
+                    f"gatilho: {plan.trigger}"
                 )
             else:
                 print(
-                    f"  sugestão agora: converter {size_frac:.0%}  ·  "
-                    "use --mark-executed após o câmbio para ativar o cronômetro de prazo"
+                    f"  próxima tranche em até {plan.days_to_due:.1f} dias  ·  "
+                    f"tamanho planejado {size_frac:.0%} (≈ ${usd_chunk:,.0f})"
                 )
-        render_live(sigs, probs, live_fx=live_fx, usdbrl_series=data_live.get("usdbrl"))
+        render_live(
+            sigs,
+            probs,
+            live_fx=live_fx,
+            usdbrl_series=data_live.get("usdbrl"),
+            execution_plan=plan,
+        )
 
     notified = False
     if args.notify:
         notified = _maybe_notify(
-            sigs, probs, decision, size_frac, deadline_remaining, live_fx, args.name
+            sigs,
+            probs,
+            decision,
+            size_frac,
+            deadline_remaining,
+            live_fx,
+            args.name,
+            force=plan.action_now,
         )
         if notified and render:
             print("  ◈  alerta aberto no navegador — abre Higlobe e converte agora.\n")
@@ -1450,7 +1829,7 @@ def _run_live_cycle(
 
     journal.append(
         _build_journal_entry(
-            probs, decision, size_frac, rate_signal, rate_live, notified
+            probs, plan, rate_signal, rate_live, notified
         )
     )
 
@@ -1463,66 +1842,87 @@ def _run_live_cycle(
         "rate_live": rate_live,
         "notified": notified,
         "deadline_remaining": deadline_remaining,
+        "execution_plan": plan.as_dict(),
         "alert": alert_result,
     }
 
 
 def _watch_loop(args) -> None:
-    """Background mode: refresh signals on a schedule, fire alerts on flip-to-NOW."""
-    interval = max(5, args.watch_interval) * 60  # seconds
-    print(
-        f"\n  ◉  watch mode · a cada {args.watch_interval} min · "
-        f"alerta abre Higlobe quando p(agora) ≥ {NOTIFY_THRESHOLD:.0%}"
+    """Background mode with a compact, non-spamming live execution tape."""
+    interval = max(1, args.watch_interval) * 60  # seconds
+    startup_banner(
+        interval_min=args.watch_interval,
+        cadence_days=args.cadence_days,
     )
+    console = WatchConsole(heartbeat_cycles=max(1, 30 // args.watch_interval))
     if getattr(args, "phone_alerts", False):
         try:
             notifier = get_notifier(args.alert_provider)
             if notifier.is_configured():
-                print(
-                    f"  📱  {notifier.name} ON · dispara em +{args.alert_threshold:.2f}% · "
-                    f"cooldown {args.alert_cooldown} min"
+                console.event(
+                    f"{notifier.name} armed · +{args.alert_threshold:.2f}% move · "
+                    f"{args.alert_cooldown}m cooldown"
                 )
             else:
-                print(
-                    f"  ⚠  --phone-alerts ({notifier.name}) faltam vars: "
-                    f"{', '.join(notifier.missing_keys())}. Rode `python configure.py`."
+                console.event(
+                    f"{notifier.name} missing {', '.join(notifier.missing_keys())}; "
+                    "run `python configure.py`",
+                    error=True,
                 )
         except ValueError as e:
-            print(f"  ⚠  provedor inválido: {e}")
-    print("  Ctrl+C para parar.\n")
+            console.event(f"invalid notifier: {e}", error=True)
     cache: Optional[dict] = None
     cycle = 0
     while True:
         try:
             cycle += 1
-            refetch = cycle % 6 == 1  # full refetch ~hourly when interval=10min
+            refetch_every = max(1, 60 // max(1, args.watch_interval))
+            refetch = cycle == 1 or cycle % refetch_every == 0
             res = _run_live_cycle(args, render=False, refetch=refetch, cache=cache)
             if res["ok"]:
                 cache = res["cache"]
-                ts = datetime.now().strftime("%H:%M")
                 d = res["decision"]
                 pn = res["probs"]["exchange_now"]
                 rate = res["rate_live"] or 0.0
                 sz = res["size"]
-                rem = res["deadline_remaining"]
-                rem_str = f"{rem}d" if rem is not None else "—"
-                tags = []
-                if res["notified"]:
-                    tags.append("◈ ALERT")
+                plan = res["execution_plan"]
+                hours_to_due = float(plan["days_to_due"]) * 24
+                if plan["action_now"]:
+                    due_label = "window open now"
+                elif hours_to_due < 24:
+                    due_label = f"due in {hours_to_due:.0f}h"
+                else:
+                    due_label = f"due in {float(plan['days_to_due']):.1f}d"
+                notified = bool(res["notified"])
                 a = res.get("alert")
                 if a and a.get("fired"):
-                    tags.append(f"📱 {a['provider']} {a['delta_pct']:+.2f}%")
-                tag = "  ".join(tags) if tags else "·"
-                print(
-                    f"  [{ts}] {d:<13} p_now={pn:.2f}  size={sz:.0%}  "
-                    f"R$ {rate:.4f}  prazo={rem_str}  {tag}"
+                    console.event(
+                        f"{a['provider']} alert sent · move {a['delta_pct']:+.2f}%"
+                    )
+                console.update(
+                    WatchSnapshot(
+                        decision=d,
+                        rate=rate,
+                        p_now=pn,
+                        opportunity_score=float(plan["opportunity_score"]),
+                        size=sz,
+                        opportunity_threshold=float(plan["opportunity_threshold"]),
+                        due_label=due_label,
+                        trigger=str(plan["trigger"]),
+                        reason=str(plan["reason"]),
+                        notified=notified,
+                    )
                 )
             time.sleep(interval)
         except KeyboardInterrupt:
-            print("\n  watch interrompido.\n")
+            console.close()
+            console.event("watch stopped")
             return
         except Exception as e:
-            print(f"  ⚠  ciclo falhou ({e}) — retentando em {args.watch_interval} min")
+            console.event(
+                f"cycle failed ({e}) · retrying in {args.watch_interval}m",
+                error=True,
+            )
             time.sleep(interval)
 
 
@@ -1566,6 +1966,13 @@ def main() -> None:
         metavar="N",
         help=f"Forced execution window in days (default: {DEFAULT_DEADLINE_DAYS}). "
         "Backtest waits at most this long before exchanging anyway.",
+    )
+    parser.add_argument(
+        "--cadence-days",
+        type=int,
+        default=DEFAULT_CADENCE_DAYS,
+        metavar="N",
+        help=f"Maximum days between small FX tranches (default: {DEFAULT_CADENCE_DAYS}).",
     )
     parser.add_argument(
         "--spread-bps",
@@ -1695,6 +2102,8 @@ def main() -> None:
         parser.error(
             "--dca-floor and --dca-ceiling must satisfy 0 ≤ floor ≤ ceiling ≤ 1."
         )
+    if not 2 <= args.cadence_days <= 30:
+        parser.error("--cadence-days must be between 2 and 30.")
 
     # ── Standalone subcommands ──────────────────────────────────────────────────────
     if args.mark_executed:
@@ -1785,6 +2194,12 @@ def main() -> None:
         render_backtest(
             rows, scenarios, check_days, args.deadline_days, args.spread_bps
         )
+        cadence_windows = evaluate_cadence_windows(
+            all_data,
+            carry_diff,
+            cadence_days=args.cadence_days,
+        )
+        render_cadence_evaluation(cadence_windows)
 
     elif args.watch:
         _watch_loop(args)

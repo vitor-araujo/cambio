@@ -49,10 +49,30 @@ def _ensure_table(conn: sqlite3.Connection) -> None:
             agreement REAL NOT NULL,
             regime REAL NOT NULL,
             notified INTEGER NOT NULL DEFAULT 0,
-            executed INTEGER NOT NULL DEFAULT 0
+            executed INTEGER NOT NULL DEFAULT 0,
+            trigger TEXT NOT NULL DEFAULT '',
+            reason TEXT NOT NULL DEFAULT '',
+            cadence_days INTEGER NOT NULL DEFAULT 4,
+            days_to_due REAL NOT NULL DEFAULT 0,
+            opportunity_score REAL NOT NULL DEFAULT 0.50,
+            opportunity_threshold REAL NOT NULL DEFAULT 0.20
         )
         """
     )
+    existing = {
+        row["name"] for row in conn.execute("PRAGMA table_info(journal)").fetchall()
+    }
+    migrations = {
+        "trigger": "TEXT NOT NULL DEFAULT ''",
+        "reason": "TEXT NOT NULL DEFAULT ''",
+        "cadence_days": "INTEGER NOT NULL DEFAULT 4",
+        "days_to_due": "REAL NOT NULL DEFAULT 0",
+        "opportunity_score": "REAL NOT NULL DEFAULT 0.50",
+        "opportunity_threshold": "REAL NOT NULL DEFAULT 0.20",
+    }
+    for column, definition in migrations.items():
+        if column not in existing:
+            conn.execute(f"ALTER TABLE journal ADD COLUMN {column} {definition}")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_journal_ts ON journal(ts)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_journal_notified ON journal(notified)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_journal_executed ON journal(executed)")
@@ -119,6 +139,12 @@ class Entry:
     notified: bool = False
     size: float = 0.25
     executed: bool = False
+    trigger: str = ""
+    reason: str = ""
+    cadence_days: int = 4
+    days_to_due: float = 0.0
+    opportunity_score: float = 0.50
+    opportunity_threshold: float = 0.20
 
 
 def _row_to_entry(r: sqlite3.Row) -> Entry:
@@ -136,6 +162,12 @@ def _row_to_entry(r: sqlite3.Row) -> Entry:
         notified=bool(r["notified"]),
         size=r["size"],
         executed=bool(r["executed"]),
+        trigger=r["trigger"],
+        reason=r["reason"],
+        cadence_days=r["cadence_days"],
+        days_to_due=r["days_to_due"],
+        opportunity_score=r["opportunity_score"],
+        opportunity_threshold=r["opportunity_threshold"],
     )
 
 
@@ -148,8 +180,9 @@ def append(entry: Entry) -> None:
         """INSERT INTO journal
            (ts, rate_signal, rate_live, decision, size,
             p_now, p_split, p_wait, composite, agreement, regime,
-            notified, executed)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            notified, executed, trigger, reason, cadence_days, days_to_due,
+            opportunity_score, opportunity_threshold)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (
             entry.ts.isoformat(timespec="seconds"),
             entry.rate_signal,
@@ -164,6 +197,12 @@ def append(entry: Entry) -> None:
             entry.regime,
             1 if entry.notified else 0,
             1 if entry.executed else 0,
+            entry.trigger,
+            entry.reason,
+            entry.cadence_days,
+            entry.days_to_due,
+            entry.opportunity_score,
+            entry.opportunity_threshold,
         ),
     )
     conn.commit()
@@ -215,8 +254,9 @@ def should_notify(
     p_now: float,
     threshold: float = 0.40,
     cooldown_hours: int = 6,
+    force: bool = False,
 ) -> bool:
-    if decision != "exchange_now" or p_now < threshold:
+    if decision != "exchange_now" or (p_now < threshold and not force):
         return False
     last = last_notified()
     if last is None:
@@ -245,6 +285,20 @@ def mark_executed(when: Optional[datetime] = None) -> Optional[Entry]:
     if not r:
         return None
     conn.execute("UPDATE journal SET executed = 1 WHERE id = ?", (r["id"],))
+    conn.commit()
+    row = conn.execute("SELECT * FROM journal WHERE id = ?", (r["id"],)).fetchone()
+    return _row_to_entry(row) if row else None
+
+
+def unmark_last_executed() -> Optional[Entry]:
+    """Undo the latest execution marker and return the affected journal entry."""
+    conn = _conn()
+    r = conn.execute(
+        "SELECT id FROM journal WHERE executed = 1 ORDER BY id DESC LIMIT 1"
+    ).fetchone()
+    if not r:
+        return None
+    conn.execute("UPDATE journal SET executed = 0 WHERE id = ?", (r["id"],))
     conn.commit()
     row = conn.execute("SELECT * FROM journal WHERE id = ?", (r["id"],)).fetchone()
     return _row_to_entry(row) if row else None
@@ -298,6 +352,20 @@ def all_entries(limit: int = 0) -> list[Entry]:
     if limit > 0:
         sql += f" LIMIT {limit}"
     return [_row_to_entry(r) for r in _conn().execute(sql).fetchall()]
+
+
+def entry_count() -> int:
+    row = _conn().execute("SELECT COUNT(*) AS count FROM journal").fetchone()
+    return int(row["count"]) if row else 0
+
+
+def notified_count() -> int:
+    row = (
+        _conn()
+        .execute("SELECT COUNT(*) AS count FROM journal WHERE notified = 1")
+        .fetchone()
+    )
+    return int(row["count"]) if row else 0
 
 
 def notified_entries(limit: int = 20) -> list[Entry]:

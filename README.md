@@ -8,7 +8,7 @@
   <p align="center">
     <a href="https://github.com/vitor-araujo/cambio/blob/main/LICENSE"><img alt="MIT" src="https://img.shields.io/badge/license-MIT-22c55e?style=flat-square"></a>
     <img alt="Python 3.10+" src="https://img.shields.io/badge/python-3.10+-4B8BBE?style=flat-square&logo=python&logoColor=white">
-    <img alt="versão 0.7.7" src="https://img.shields.io/badge/version-0.7.7-2563eb?style=flat-square">
+    <img alt="versão 0.8.0" src="https://img.shields.io/badge/version-0.8.0-2563eb?style=flat-square">
     <img alt="sem API key" src="https://img.shields.io/badge/dados-grátis%20·%20sem%20API%20key-f59e0b?style=flat-square">
     <img alt="pt · en" src="https://img.shields.io/badge/lang-pt--BR%20·%20en-6366f1?style=flat-square">
   </p>
@@ -26,8 +26,8 @@ Ele pega 12 indicadores (dólar, RSI, Bollinger, carry, COT, etc.) e calcula uma
 
 Se você recebe dólar (freelancer, remessa, salário em USD), precisa decidir quando converter. O cambio te diz:
 
-- **Quando:** a probabilidade de "trocar agora" vs "esperar"
-- **Quanto:** uma fração entre 25% e 100% do saldo — nunca zero, nunca tudo (disciplina Vanguard-DCA)
+- **Quando:** uma janela recorrente a cada 3–4 dias, antecipada apenas por um sinal forte
+- **Quanto:** uma tranche entre 25% e 50% do saldo disponível
 
 Ele nunca diz "compre" ou "venda". Diz: "dada a probabilidade, faz sentido converter X% agora."
 
@@ -46,7 +46,8 @@ Abre em **http://localhost:5173**. Pronto. O programa vai buscar dados do mercad
 - Probabilidade de "trocar agora" vs "esperar"
 - Últimos sinais com gráfico
 - Botão pra abrir a corretora (Higlobe, Husky, TechFX)
-- Cronômetro mostrando quando é a próxima coleta
+- Relógio mostrando quando a próxima tranche abre ou vence
+- Ordem indicativa em USD e BRL, com registro e opção de desfazer
 
 Se quiser trocar a corretora, clique no botão e escolha. Se quiser alerta no celular (Telegram), configure pela aba Telegram no dashboard.
 
@@ -66,9 +67,22 @@ python3 -m venv .venv
 
 ## O que o programa faz
 
-### 🎯 Sizing Vanguard-DCA
+### 🎯 Cadência adaptativa
 
-A cada ciclo, ele calcula uma fração entre **25%** (piso) e **100%** (teto) do saldo. Se a probabilidade de "agora" é alta, converte mais. Se é baixa, converte menos. Mas sempre converte pelo menos 25% — assim você não fica paralisado esperando o "momento perfeito" que nunca vem.
+O modelo separa duas decisões que antes estavam misturadas:
+
+1. **Direção:** os 12 sinais estimam a qualidade relativa do preço.
+2. **Execução:** um relógio limita quanto tempo o sistema pode esperar.
+
+Depois de uma tranche, o sistema preserva opcionalidade. No terceiro dia, abre uma janela e aceita o sinal quando ele supera um limiar decrescente. No quarto dia, a tranche é obrigatória mesmo com `p(agora)` baixo. Assim, o mercado escolhe o melhor ponto **dentro de uma janela limitada**, mas não paralisa a conversão.
+
+O tamanho padrão fica entre **25% e 50%** do saldo disponível. O piso reduz arrependimento de timing; o teto evita uma operação grande demais em uma previsão incerta.
+
+### Qualidade da janela
+
+`p(agora)` continua sendo a visão direcional de médio prazo e dimensiona a tranche. Para escolher entre o terceiro e o quarto dia, o sistema usa uma medida separada e mais rápida: o percentil da taxa USD/BRL atual dentro das últimas 20 sessões.
+
+Como você está vendendo USD, uma taxa USD/BRL alta recebe uma qualidade maior. No terceiro dia, uma taxa acima do 35º percentil pode abrir a execução; o limiar cai continuamente até o quarto dia. A mesa mostra **qualidade × limiar** separadamente, sem fingir que a qualidade é uma probabilidade estatística.
 
 ### 📡 Dados ao vivo (de graça)
 
@@ -84,7 +98,7 @@ Busca automaticamente de 5 fontes:
 
 ### 🖥️ Dashboard web
 
-Rodando `python server.py --dev`, ele sobe um site com tudo na tela: gráfico do dólar e da probabilidade, últimos sinais, config de Telegram, thresholds — tudo clicável, sem precisar de terminal.
+Rodando `python server.py --dev`, ele sobe uma mesa de execução com instrução atual, próxima janela, ordem indicativa, gráfico preço × convicção, ledger, Telegram e controles de risco.
 
 A coleta de dados roda em background. Toda vez que o programa busca novos dados, o SQLite atualiza sozinho. Você pode mudar o intervalo de coleta pela interface (Na aba Thresholds, mude `watch_interval_min`).
 
@@ -133,7 +147,7 @@ Depois de converter o dólar, você marca:
 python fx_timing.py --mark-executed
 ```
 
-Isso ancora o cronômetro — se você tem 15 dias pra converter, agora o programa sabe quando começou a contagem.
+O mesmo registro pode ser feito pelo botão **Marcar tranche executada** na mesa. Ele ancora o relógio de quatro dias; a interface oferece **Desfazer** imediatamente se você clicar por engano.
 
 ### 📊 Auditoria de comportamento
 
@@ -173,20 +187,15 @@ São 12 sinais em 4 famílias. Cada um tem um peso (que soma 100%) e um score (p
 
 ---
 
-## Backtest (resultados históricos)
+## Backtest
 
-O programa simula o que teria acontecido se você usasse o modelo desde 2022:
-
-| Calendário | Acertou "agora" | Acertou "esperar" | Total de decisões |
-|---|---|---|---|
-| Dias 2 e 17 | 58% | 44% | 102 |
-| Dias 5 e 20 | **75%** | 42% | 103 |
-
-Esses números mudam conforme o calendário. Rode o backtest no seu calendário antes de confiar:
+O backtest walk-forward mede o componente direcional em datas definidas pelo usuário. A cadência de quatro dias é um controle de execução, não uma promessa de prever o melhor preço. Rode o teste no seu calendário e informe o spread real:
 
 ```bash
 python fx_timing.py --backtest --days 5 20   # dias 5 e 20 de cada mês
 ```
+
+**Snapshot walk-forward em 20/07/2026:** 284 janelas independentes de 3–4 dias, 61,6% executadas no terceiro dia e 56,7% de acerto ao escolher a melhor taxa entre os dois dias. A política ficou `+6,1 bps` contra sempre esperar o quarto dia e `-1,4 bps` contra sempre executar no terceiro. No holdout 2025+, o ganho contra o quarto dia foi `+16,4 bps` (bootstrap 95%: `+9,0` a `+24,8 bps`). Isso valida a seleção **contra esperar sempre até o quarto dia**, não prova alfa nem garante a melhor cotação.
 
 ---
 
@@ -196,7 +205,7 @@ python fx_timing.py --backtest --days 5 20   # dias 5 e 20 de cada mês
 
 | Flag | Padrão | O que faz |
 |---|---|---|
-| `--dev` | — | Sobreo site + Vite (recomendado) |
+| `--dev` | — | Sobe o site + Vite (recomendado) |
 | `--port` | 8765 | Porta da API |
 | `--interval` | 5 | Minutos entre coletas de dados |
 
@@ -210,7 +219,8 @@ python fx_timing.py --backtest --days 5 20   # dias 5 e 20 de cada mês
 | `--notify` | — | Abre alerta no navegador quando probabilidade é alta |
 | `--phone-alerts` | — | Manda mensagem no Telegram/celular |
 | `--dca-floor 0.25` | 0.25 | Fração mínima que converte (25%) |
-| `--dca-ceiling 0.75` | 0.75 | Fração máxima que converte (75%) |
+| `--dca-ceiling 0.50` | 0.50 | Fração máxima que converte (50%) |
+| `--cadence-days 4` | 4 | Máximo de dias entre tranches |
 | `--deadline-days 15` | 15 | Prazo máximo em dias |
 | `--mark-executed` | — | Marca que você fez o câmbio (para o cronômetro) |
 | `--audit 30` | 30 | Mostra auditoria dos últimos N dias |
@@ -227,9 +237,9 @@ python configure.py --reset  # zera âncora e cooldown
 
 ---
 
-## Thresholds (configuráveis pela interface)
+## Controles (configuráveis pela interface)
 
-Esses valores você pode alterar no dashboard (aba Thresholds) ou pela API:
+Esses valores podem ser alterados na aba **Controles** ou pela API. O servidor valida faixas e grava o arquivo de forma atômica:
 
 | Nome | Padrão | O que significa |
 |---|---|---|
@@ -239,7 +249,8 @@ Esses valores você pode alterar no dashboard (aba Thresholds) ou pela API:
 | `alert_threshold_pct` | 1.0 | % de alta intra-day (vs primeira cotação do dia) pra disparar alerta |
 | `alert_cooldown_min` | 5 | Minutos mínimos entre alertas no Telegram |
 | `dca_floor` | 0.25 | Fração mínima que converte por ciclo (25%) |
-| `dca_ceiling` | 0.75 | Fração máxima que converte por ciclo (75%) |
+| `dca_ceiling` | 0.50 | Fração máxima que converte por ciclo (50%) |
+| `cadence_days` | 4 | Prazo máximo entre duas tranches |
 | `spread_bps` | 50 | Spread da corretora em basis points (0.50%) |
 | `deadline_days` | 15 | Dias até forçar a conversão |
 
@@ -254,13 +265,14 @@ Todos os endpoints em `http://127.0.0.1:8765/api/`:
 | Endpoint | Método | O que retorna |
 |---|---|---|
 | `/dashboard` | GET | Resumo geral + últimos sinais |
-| `/journal` | GET | Todas as entradas do diário |
+| `/journal?limit=1000` | GET | Entradas recentes do diário, com limite de 1 a 5.000 |
 | `/state` | GET | Estado do alerta (âncora, cooldown) |
 | `/thresholds` | GET | Valores atuais dos thresholds |
-| `/thresholds` | POST | Atualiza thresholds |
 | `/notifier` | GET | Status do Telegram (configurado?) |
 | `/notifier` | POST | Salva configuração do Telegram |
 | `/notifier/test` | POST | Envia mensagem de teste |
+| `/executions` | POST | Marca a última tranche como executada |
+| `/executions/undo` | POST | Desfaz a última marcação de execução |
 | `/health` | GET | Health check (tá tudo funcionando?) |
 
 ---
@@ -324,7 +336,7 @@ Inclua um diff de acurácia do backtest em qualquer PR de sinal.
 
 ## English
 
-**cambio** decides **how much** USD to convert each cycle using 12 quant signals over public data with Vanguard-DCA discipline (never zero, never all-in). It pings your browser/phone when conviction is high.
+**cambio** is a personal USD/BRL execution desk. Twelve public-data signals rank price quality while a cadence policy opens a small tranche every three to four days, preventing indefinite waits.
 
 ### Quick start
 
@@ -338,9 +350,10 @@ python fx_timing.py --watch --notify     # CLI background mode
 
 ### Features
 
-* 🎯 **Vanguard-DCA sizing** — converts a fraction in `[dca_floor, dca_ceiling]` proportional to conviction
+* 🎯 **Adaptive cadence** — day-three opportunity window, day-four mandatory tranche
+* ◫ **Bounded sizing** — converts 25–50% of the available balance, scaled by conviction
 * ⚖️ **Cost-Matters validator** — flags if model edge doesn't clear 2× spread
-* ⏱️ **Deadline countdown** — days left until forced execution
+* ⏱️ **Execution clock** — signal hurdle declines as the four-day budget is consumed
 * 📊 **Behavior-gap audit** — shows how many alerts you ignored
 * 📡 **Live data** — BCB PTAX, AwesomeAPI, Yahoo, CFTC, SELIC. No API keys
 * 🖥️ **Web dashboard** — charts, thresholds, Telegram config, all in the browser
@@ -373,7 +386,7 @@ python fx_timing.py --watch --notify --phone-alerts
 # One-shot analysis:
 python fx_timing.py --lang pt
 
-# Mark that you converted (anchors the deadline):
+# Mark that you converted (anchors the next four-day window):
 python fx_timing.py --mark-executed
 
 # Behavior audit:
@@ -407,7 +420,8 @@ The alert compares the live rate against the day's first observed rate (intra-da
 | `alert_threshold_pct` | 1.0 | % intra-day rise (vs day's first rate) to trigger phone alert |
 | `alert_cooldown_min` | 5 | Minutes between phone alerts |
 | `dca_floor` | 0.25 | Min fraction per cycle (25%) |
-| `dca_ceiling` | 0.75 | Max fraction per cycle (75%) |
+| `dca_ceiling` | 0.50 | Max fraction per cycle (50%) |
+| `cadence_days` | 4 | Maximum days between tranches |
 | `spread_bps` | 50 | Effective FX spread in basis points |
 | `deadline_days` | 15 | Days until forced execution |
 
@@ -417,7 +431,7 @@ Changes to `watch_interval_min` take effect within 10 seconds.
 
 ```
 fx_timing.py [--backtest] [--days DAY ...] [--lang {en,pt}]
-             [--deadline-days N] [--spread-bps BPS]
+             [--deadline-days N] [--cadence-days N] [--spread-bps BPS]
              [--dca-floor FRAC] [--dca-ceiling FRAC]
              [--notify] [--watch] [--watch-interval MIN] [--name NAME]
              [--phone-alerts] [--alert-provider {telegram,whatsapp}]
@@ -431,8 +445,9 @@ fx_timing.py [--backtest] [--days DAY ...] [--lang {en,pt}]
 | `--days` | `2 17` | Day(s) of month you typically decide |
 | `--lang` | `en` | Output language (`en` or `pt`) |
 | `--deadline-days` | `15` | Forced-execution window |
+| `--cadence-days` | `4` | Maximum days between live execution tranches |
 | `--dca-floor` | `0.25` | Min fraction per cycle (Vanguard-DCA) |
-| `--dca-ceiling` | `1.00` | Max fraction when conviction is high |
+| `--dca-ceiling` | `0.50` | Max fraction when conviction is high |
 | `--notify` | — | Open HTML alert on flip-to-NOW |
 | `--watch` | — | Background mode |
 | `--watch-interval` | `5` | Minutes between checks |
@@ -448,11 +463,13 @@ All endpoints at `http://127.0.0.1:8765/api/`:
 | Endpoint | Method | Description |
 |---|---|---|
 | `/dashboard` | GET | Summary + latest signals |
-| `/journal` | GET | Full journal |
+| `/journal?limit=1000` | GET | Recent journal entries (max 5,000) |
 | `/state` | GET | Alert state (anchor, cooldown) |
 | `/thresholds` | GET/POST | Read/update thresholds |
 | `/notifier` | GET/POST | Telegram config status/save |
 | `/notifier/test` | POST | Send test message |
+| `/executions` | POST | Mark latest tranche as executed |
+| `/executions/undo` | POST | Undo latest execution marker |
 | `/health` | GET | Health check |
 
 ### Server flags
@@ -478,12 +495,7 @@ All endpoints at `http://127.0.0.1:8765/api/`:
 
 ### Backtest
 
-Walk-forward, no look-ahead. Oracle = rate at next scheduled check date.
-
-| Schedule | NOW | WAIT | Calls |
-|---|---|---|---|
-| 2nd & 17th | 58% | 44% | 102 |
-| 5th & 20th | **75%** | 42% | 103 |
+Walk-forward, no look-ahead. The backtest evaluates the directional component on user-selected dates; the four-day cadence is a live execution constraint rather than a claim of perfect market timing.
 
 ### Contributing
 

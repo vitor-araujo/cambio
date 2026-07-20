@@ -1,6 +1,6 @@
 # Guia para leigos 🇧🇷
 
-Nunca mexeu com programação? Esse guia parte do zero. O **cambio** é um script Python — um programinha de terminal que roda no seu computador, busca dados na internet e te diz o resultado. Não tem site, app ou instalador.
+Nunca mexeu com programação? Esse guia parte do zero. O **cambio** roda no seu computador, busca dados públicos de mercado e oferece uma mesa web e uma linha de comando.
 
 > Você vai usar no máximo 5 comandos diferentes. Calma que dá.
 
@@ -83,13 +83,13 @@ Esse passo é feito **uma única vez**. Próxima execução, pula direto pro pas
 
 ## Passo 5
 
-### Primeira análise
+### Abrir a mesa
 
 ```bash
-.venv/bin/python fx_timing.py --lang pt
+.venv/bin/python server.py --dev
 ```
 
-5–10 segundos depois, aparece a tabela de sinais e a recomendação. Pronto.
+Abra **http://localhost:5173**. A tela mostra a tranche atual, a próxima janela, a taxa de referência e o ledger. Para uma análise única no terminal, use `.venv/bin/python fx_timing.py --lang pt`.
 
 ---
 
@@ -101,7 +101,7 @@ Esse passo é feito **uma única vez**. Próxima execução, pula direto pro pas
 .venv/bin/python fx_timing.py --lang pt --notify
 ```
 
-Quando os sinais convergirem com convicção (`p(AGORA) ≥ 55 %`), abre uma página HTML no navegador com:
+Quando uma janela abre por sinal ou cadência, aparece a instrução com:
 
 * a taxa atual ao vivo
 * os 5 sinais mais relevantes
@@ -121,14 +121,13 @@ A forma mais prática no dia-a-dia. Deixa rodando, ele te avisa.
 .venv/bin/python fx_timing.py --lang pt --watch --notify
 ```
 
-* Re-roda a cada 60 minutos (use `--watch-interval 15` pra checar a cada 15 min)
+* Re-roda a cada 5 minutos por padrão (use `--watch-interval 1` pra checar a cada minuto)
 * Registra cada ciclo no diário
-* Abre o alerta no navegador quando o sinal vira pra **AGORA**
+* Abre o alerta quando uma tranche fica pronta para execução
 * `Ctrl+C` pra parar
 
-```
-[14:32] wait          p_now=0.31  R$ 5.0810  ·
-[15:32] exchange_now  p_now=0.62  R$ 5.1340  ◈ ALERT
+```text
+11:42:08  EXECUTE  R$ 5.1003 · p(now) 31% / hurdle 30% · tranche 26% · window open now
 ```
 
 > **Dica:** rode dentro de `tmux` ou em uma aba dedicada do Terminal.
@@ -139,13 +138,13 @@ A forma mais prática no dia-a-dia. Deixa rodando, ele te avisa.
 
 ### Diário + auditoria de comportamento
 
-Toda execução adiciona uma linha em `.fx_journal.csv`. Na rodada seguinte, aparece no topo:
+Cada observação adiciona uma linha ao SQLite local `.fx_journal.db`. Na rodada seguinte, aparece no topo:
 
 ```
 último sinal há 6h: WAIT @ R$ 5.0810  →  agora R$ 5.1340  (+1.04%) ✓
 ```
 
-Depois que você fecha um câmbio na corretora, marca a entrada para o cronômetro de prazo funcionar:
+Depois que fechar o câmbio, clique em **Marcar tranche executada** na mesa ou use:
 
 ```bash
 .venv/bin/python fx_timing.py --mark-executed
@@ -159,7 +158,7 @@ Quer ver quantos alertas você ignorou? (a *behavior gap* que destrói mais valo
 
 Mostra: alertas disparados, câmbios marcados, alertas ignorados, taxa de override.
 
-O CSV abre direto no Excel ou Numbers se quiser ver o histórico completo. O arquivo não vai pro Git — é só seu.
+O banco local não vai para o Git e fica apenas no seu computador.
 
 ---
 
@@ -181,7 +180,8 @@ Mostra como o modelo teria performado nos *seus* dias específicos de decisão. 
 
 * `--deadline-days 15` — força o câmbio depois de N dias mesmo se o sinal disser pra aguardar.
 * `--spread-bps 50` — desconta o spread da corretora (Wise, Higlobe, etc). 50 = 0,50 %.
-* `--dca-floor 0.25 --dca-ceiling 1.00` — disciplina Vanguard-DCA. Cada checkpoint converte uma fração entre 25 % e 100 % do que ainda falta, baseada na convicção do modelo. Nunca zero, nunca tudo no escuro.
+* `--dca-floor 0.25 --dca-ceiling 0.50` — limita cada tranche entre 25 % e 50 % do saldo disponível.
+* `--cadence-days 4` — no uso ao vivo, impede que o modelo espere mais de quatro dias entre tranches.
 
 ```bash
 .venv/bin/python fx_timing.py --lang pt --backtest --days 5 20 --deadline-days 15 --spread-bps 50
@@ -216,6 +216,7 @@ Ou, mais útil, deixa o background ligado:
 | Análise + alerta | `... --lang pt --notify` |
 | Background com alerta | `... --lang pt --watch --notify` |
 | Background a cada 15 min | `... --lang pt --watch --notify --watch-interval 15` |
+| Tranche no máximo a cada 4 dias | `... --watch --cadence-days 4` |
 | Backtest padrão | `... --backtest` |
 | Backtest no seu dia | `... --backtest --days 10` |
 | Backtest com deadline e spread | `... --backtest --deadline-days 15 --spread-bps 50` |

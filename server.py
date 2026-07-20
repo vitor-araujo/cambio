@@ -14,6 +14,8 @@ Endpoints:
   GET  /api/state       — alert state (anchor, cooldown)
   GET  /api/thresholds  — current thresholds
   POST /api/thresholds  — update thresholds
+  POST /api/executions  — mark latest suggested tranche as executed
+  POST /api/executions/undo — undo latest execution marker
   GET  /api/notifier    — phone alert config status
   POST /api/notifier    — configure phone alerts
   POST /api/notifier/test — send a test message
@@ -31,10 +33,12 @@ import time
 from datetime import date, timedelta
 from http.server import HTTPServer, SimpleHTTPRequestHandler
 from urllib.request import Request, urlopen
+from urllib.parse import parse_qs, urlparse
 
 import journal_db as journal
 from notifiers import get_notifier
 from notifiers.telegram import API_BASE
+from terminal_ui import WatchConsole, WatchSnapshot, startup_banner
 
 STATE_PATH = ".fx_alert.state"
 THRESHOLDS_PATH = ".fx_thresholds.json"
@@ -47,9 +51,23 @@ DEFAULT_THRESHOLDS = {
     "alert_threshold_pct": 1.0,
     "alert_cooldown_min": 5,
     "dca_floor": 0.25,
-    "dca_ceiling": 0.75,
+    "dca_ceiling": 0.50,
+    "cadence_days": 4,
     "spread_bps": 50,
     "deadline_days": 15,
+}
+
+THRESHOLD_BOUNDS = {
+    "watch_interval_min": (1, 60),
+    "notify_threshold": (0.0, 1.0),
+    "notify_cooldown_hours": (0, 72),
+    "alert_threshold_pct": (0.1, 20.0),
+    "alert_cooldown_min": (1, 1440),
+    "dca_floor": (0.05, 1.0),
+    "dca_ceiling": (0.05, 1.0),
+    "cadence_days": (2, 30),
+    "spread_bps": (0, 1000),
+    "deadline_days": (1, 90),
 }
 
 logging.basicConfig(
@@ -76,8 +94,12 @@ def load_thresholds() -> dict:
 
 def save_thresholds(thresholds: dict) -> bool:
     try:
-        with open(THRESHOLDS_PATH, "w") as f:
+        temp_path = f"{THRESHOLDS_PATH}.tmp"
+        with open(temp_path, "w") as f:
             json.dump(thresholds, f, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(temp_path, THRESHOLDS_PATH)
         return True
     except Exception:
         return False
@@ -198,23 +220,30 @@ class CambioHandler(SimpleHTTPRequestHandler):
     start_time = time.time()
 
     def do_GET(self):
-        if self.path == "/api/health":
+        parsed = urlparse(self.path)
+        path = parsed.path
+        if path == "/api/health":
             self._json(_health_check())
-        elif self.path == "/api/journal":
-            entries = journal.all_entries()
+        elif path == "/api/journal":
+            query = parse_qs(parsed.query)
+            try:
+                limit = min(5000, max(1, int(query.get("limit", [1000])[0])))
+            except (TypeError, ValueError):
+                limit = 1000
+            entries = journal.all_entries(limit)
             self._json([_entry_dict(e) for e in entries])
-        elif self.path == "/api/state":
+        elif path == "/api/state":
             self._json(load_state())
-        elif self.path == "/api/thresholds":
+        elif path == "/api/thresholds":
             self._json(load_thresholds())
-        elif self.path == "/api/notifier":
+        elif path == "/api/notifier":
             self._json(_notifier_status())
-        elif self.path == "/api/ibov":
+        elif path == "/api/ibov":
             self._json(_ibov_data())
-        elif self.path == "/api/usdbrl":
+        elif path == "/api/usdbrl":
             self._json(_usdbrl_data())
-        elif self.path == "/api/dashboard":
-            entries = journal.all_entries()
+        elif path == "/api/dashboard":
+            entries = journal.all_entries(50)
             last = entries[0] if entries else None
             notified = journal.notified_entries(10)
             self._json(
@@ -223,8 +252,8 @@ class CambioHandler(SimpleHTTPRequestHandler):
                     "thresholds": load_thresholds(),
                     "last_signal": _entry_dict(last) if last else None,
                     "recent_signals": [_entry_dict(e) for e in entries[:50]],
-                    "total_signals": len(entries),
-                    "total_alerts": len([e for e in entries if e.notified]),
+                    "total_signals": journal.entry_count(),
+                    "total_alerts": journal.notified_count(),
                     "recent_alerts": [_entry_dict(e) for e in notified],
                 }
             )
@@ -238,6 +267,24 @@ class CambioHandler(SimpleHTTPRequestHandler):
             self._handle_notifier_config()
         elif self.path == "/api/notifier/test":
             self._handle_notifier_test()
+        elif self.path == "/api/executions":
+            entry = journal.mark_executed()
+            if entry is None:
+                self._json(
+                    {"ok": False, "error": "No signal is available to mark."},
+                    status=404,
+                )
+            else:
+                self._json({"ok": True, "execution": _entry_dict(entry)})
+        elif self.path == "/api/executions/undo":
+            entry = journal.unmark_last_executed()
+            if entry is None:
+                self._json(
+                    {"ok": False, "error": "No execution is available to undo."},
+                    status=404,
+                )
+            else:
+                self._json({"ok": True, "execution": _entry_dict(entry)})
         else:
             self.send_error(404, "Not Found")
 
@@ -250,8 +297,21 @@ class CambioHandler(SimpleHTTPRequestHandler):
         body = self._read_body()
         try:
             updates = json.loads(body)
+            if not isinstance(updates, dict):
+                raise ValueError("Threshold updates must be a JSON object.")
+            unknown = set(updates) - set(THRESHOLD_BOUNDS)
+            if unknown:
+                raise ValueError(f"Unknown threshold(s): {', '.join(sorted(unknown))}")
+            for key, value in updates.items():
+                if isinstance(value, bool) or not isinstance(value, (int, float)):
+                    raise ValueError(f"{key} must be numeric.")
+                low, high = THRESHOLD_BOUNDS[key]
+                if not low <= value <= high:
+                    raise ValueError(f"{key} must be between {low} and {high}.")
             current = load_thresholds()
             current.update(updates)
+            if current["dca_floor"] > current["dca_ceiling"]:
+                raise ValueError("dca_floor cannot exceed dca_ceiling.")
             ok = save_thresholds(current)
             self._json(
                 {"ok": ok, "thresholds": current}
@@ -340,7 +400,8 @@ class CambioHandler(SimpleHTTPRequestHandler):
         self.send_header("Access-Control-Allow-Headers", "Content-Type")
 
     def log_message(self, format, *args):
-        log.info("%s", format % args)
+        if args and isinstance(args[0], str) and args[0].startswith(("4", "5")):
+            log.warning("%s", format % args)
 
 
 def _health_check() -> dict:
@@ -351,7 +412,7 @@ def _health_check() -> dict:
     # database
     try:
         entries = journal.all_entries(1)
-        checks["db"] = {"ok": True, "entries": len(journal.all_entries())}
+        checks["db"] = {"ok": True, "entries": journal.entry_count()}
         checks["last_signal_age_min"] = (
             round((time.time() - entries[0].ts.timestamp()) / 60, 1)
             if entries
@@ -500,6 +561,12 @@ def _entry_dict(e: journal.Entry) -> dict:
         "regime": e.regime,
         "notified": e.notified,
         "executed": e.executed,
+        "trigger": e.trigger,
+        "reason": e.reason,
+        "cadence_days": e.cadence_days,
+        "days_to_due": e.days_to_due,
+        "opportunity_score": e.opportunity_score,
+        "opportunity_threshold": e.opportunity_threshold,
     }
 
 
@@ -536,7 +603,7 @@ def _watch_worker(cli_interval_min: int = 5) -> None:
     cycle = 0
     last_interval = cli_interval_min
     cache = None
-    log.info("watch thread started — interval=%d min (from CLI)", cli_interval_min)
+    console = WatchConsole(heartbeat_cycles=max(1, 30 // max(1, cli_interval_min)))
 
     while True:
         # Re-read thresholds every cycle so UI changes take effect immediately.
@@ -554,36 +621,51 @@ def _watch_worker(cli_interval_min: int = 5) -> None:
             alert_cooldown=int(t.get("alert_cooldown_min", interval_min)),
             alert_provider=None,
             dca_floor=float(t.get("dca_floor", 0.25)),
-            dca_ceiling=float(t.get("dca_ceiling", 0.75)),
+            dca_ceiling=float(t.get("dca_ceiling", 0.50)),
+            cadence_days=int(t.get("cadence_days", 4)),
             deadline_days=int(t.get("deadline_days", 15)),
             name="Vitor",
         )
 
         try:
             cycle += 1
-            refetch = cycle % 6 == 1  # full refetch ~hourly
+            refetch_every = max(1, 60 // max(1, interval_min))
+            refetch = cycle == 1 or cycle % refetch_every == 0
             res = fx_timing._run_live_cycle(
                 args, render=False, refetch=refetch, cache=cache
             )
             if res.get("ok"):
                 cache = res.get("cache")
-                ts = time.strftime("%H:%M")
                 d = res["decision"]
                 pn = res["probs"]["exchange_now"]
                 rate = res["rate_live"] or 0.0
                 sz = res["size"]
-                log.info(
-                    "[%s] %s  p_now=%.2f  size=%.0f%%  R$ %.4f",
-                    ts,
-                    d,
-                    pn,
-                    sz * 100,
-                    rate,
+                plan = res["execution_plan"]
+                hours_to_due = float(plan["days_to_due"]) * 24
+                if plan["action_now"]:
+                    due_label = "window open now"
+                elif hours_to_due < 24:
+                    due_label = f"due in {hours_to_due:.0f}h"
+                else:
+                    due_label = f"due in {float(plan['days_to_due']):.1f}d"
+                console.update(
+                    WatchSnapshot(
+                        decision=d,
+                        rate=rate,
+                        p_now=pn,
+                        opportunity_score=float(plan["opportunity_score"]),
+                        size=sz,
+                        opportunity_threshold=float(plan["opportunity_threshold"]),
+                        due_label=due_label,
+                        trigger=str(plan["trigger"]),
+                        reason=str(plan["reason"]),
+                        notified=bool(res["notified"]),
+                    )
                 )
             else:
-                log.warning("watch cycle failed — retrying next interval")
+                console.event("market cycle failed · retrying next interval", error=True)
         except Exception as e:
-            log.warning("watch cycle error: %s — retrying", e)
+            console.event(f"market cycle error: {e} · retrying", error=True)
 
         # Sleep in 10-second chunks so interval changes from the UI
         # take effect within 10 seconds instead of waiting for the
@@ -616,6 +698,12 @@ def main():
         help="Watch loop interval in minutes (default: 5)",
     )
     args = parser.parse_args()
+
+    thresholds = load_thresholds()
+    startup_banner(
+        interval_min=int(thresholds.get("watch_interval_min", args.interval)),
+        cadence_days=int(thresholds.get("cadence_days", 4)),
+    )
 
     # Always run the watch loop — the server needs fresh data
     watcher = threading.Thread(target=_watch_worker, args=(args.interval,), daemon=True)

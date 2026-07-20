@@ -10,7 +10,7 @@ Requires `python server.py` running in another terminal.
 import argparse
 import json
 import sys
-from urllib.error import URLError
+from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 
@@ -30,6 +30,11 @@ def post(url: str, body: dict) -> tuple[int, dict]:
     try:
         with urlopen(req, timeout=5) as resp:
             return resp.status, json.loads(resp.read())
+    except HTTPError as e:
+        try:
+            return e.code, json.loads(e.read())
+        except Exception:
+            return e.code, {"error": str(e.reason)}
     except URLError as e:
         return 0, {"error": str(e.reason)}
 
@@ -109,10 +114,9 @@ def main():
                 passed += check("  has ts", "ts" in data[0])
                 total += 1
                 passed += check("  has decision", "decision" in data[0])
-                passed += 2
+                passed += 1  # parent GET /journal check
             else:
-                passed += 1
-                total += 2
+                passed += 1  # parent GET /journal check
         else:
             passed += 0
 
@@ -137,7 +141,7 @@ def main():
             passed += check("  has provider", "provider" in data)
             total += 1
             passed += check("  has is_configured", "is_configured" in data)
-            passed += 2
+            passed += 1  # parent GET /notifier check
         else:
             passed += 0
 
@@ -157,6 +161,26 @@ def main():
     else:
         print(fail("POST /thresholds — could not read current"))
         total -= 1
+
+    # Invalid controls are rejected instead of silently corrupting policy.
+    total += 1
+    status, data = post(f"{base}/thresholds", {"cadence_days": 0})
+    passed += check(
+        "POST /thresholds validation",
+        status == 400 and bool(data.get("error")),
+        f"status={status}",
+    )
+
+    # Execution lifecycle is reversible.
+    total += 1
+    status, data = post(f"{base}/executions", {})
+    marked = status == 200 and data.get("execution", {}).get("executed") is True
+    passed += check("POST /executions", marked, f"status={status}")
+
+    total += 1
+    status, data = post(f"{base}/executions/undo", {})
+    undone = status == 200 and data.get("execution", {}).get("executed") is False
+    passed += check("POST /executions/undo", undone, f"status={status}")
 
     print(f"\n  {passed}/{total} passed\n")
 
