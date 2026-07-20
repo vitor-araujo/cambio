@@ -115,17 +115,10 @@ a {
 }
 
 .brand-mark {
-  display: grid;
-  width: 36px;
-  height: 36px;
-  place-items: center;
-  border: 1px solid rgba(225, 162, 93, 0.42);
-  border-radius: 50%;
-  color: var(--copper);
-  font-family: "Geist Mono", monospace;
-  font-size: 15px;
-  font-weight: 720;
-  box-shadow: inset 0 0 0 4px rgba(225, 162, 93, 0.06);
+  width: 40px;
+  height: 40px;
+  flex: 0 0 40px;
+  object-fit: contain;
 }
 
 .brand div {
@@ -327,6 +320,62 @@ a {
   width: min(1440px, 100%);
   margin: 0 auto;
   padding: 40px clamp(24px, 4vw, 56px) 80px;
+}
+
+.portfolio-notice {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 24px;
+  margin-bottom: 24px;
+  overflow: hidden;
+  border: 1px solid rgba(119, 200, 228, 0.2);
+  border-radius: var(--radius);
+  background: linear-gradient(90deg, rgba(119, 200, 228, 0.09), rgba(16, 38, 54, 0.56) 42%, rgba(225, 162, 93, 0.06));
+  padding: 16px 20px;
+}
+
+.portfolio-notice::before {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 3px;
+  background: var(--signal);
+  content: "";
+}
+
+.portfolio-notice > span {
+  color: var(--signal);
+  font-family: "Geist Mono", monospace;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.portfolio-notice p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.portfolio-notice p strong {
+  color: var(--ledger);
+  font-weight: 620;
+}
+
+.portfolio-notice a {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--ledger);
+  font-size: 11px;
+  font-weight: 650;
+  text-decoration: none;
+}
+
+.portfolio-notice a span {
+  color: var(--copper);
 }
 
 .view-stack {
@@ -1232,6 +1281,13 @@ td.strong { color: var(--ledger); font-weight: 600; }
   justify-items: center;
 }
 
+.loading-mark {
+  width: 68px;
+  height: 68px;
+  margin-bottom: 18px;
+  object-fit: contain;
+}
+
 .loading-brand {
   color: var(--ledger);
   font-family: "Geist Mono", monospace;
@@ -1313,6 +1369,8 @@ td.strong { color: var(--ledger); font-weight: 600; }
   .workspace-bar h1 { font-size: 24px; }
   .workspace-live .decision-badge { display: none; }
   .workspace-content { padding: 20px 16px 48px; }
+  .portfolio-notice { grid-template-columns: 1fr auto; gap: 8px 16px; }
+  .portfolio-notice p { grid-column: 1 / -1; grid-row: 2; }
   .view-stack { gap: 20px; }
   .execution-ticket { min-height: auto; border-radius: 16px; }
   .ticket-copy { padding: 28px 24px; }

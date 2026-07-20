@@ -3,6 +3,21 @@
 All notable changes to cambio are documented here. The project follows
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- New cambio brand mark, responsive browser favicons, and Apple touch icon.
+- Backend-free portfolio mode with synthetic market data, local interactions,
+  responsive case-study framing, and a dedicated static build.
+- GitHub Pages deployment workflow and host-agnostic launch instructions.
+
+### Changed
+
+- Rewritten project README with clearer positioning, setup instructions,
+  execution-policy explanation, validation context, and reference sections.
+- Relative asset routing so the static build works from repository subpaths.
+
 ## [0.8.0] - 2026-07-20
 
 ### Added

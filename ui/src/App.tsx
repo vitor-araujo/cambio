@@ -12,6 +12,9 @@ import {
 } from "recharts";
 
 const API = "/api";
+const portfolioMode = import.meta.env.VITE_PORTFOLIO_MODE === "true";
+const BRAND_MARK = `${import.meta.env.BASE_URL}cambio-mark.png`;
+const REPOSITORY_URL = "https://github.com/vitor-araujo/cambio";
 
 interface Thresholds {
   watch_interval_min: number;
@@ -125,6 +128,10 @@ const TRIGGER_COPY: Record<string, { title: string; detail: string }> = {
 };
 
 async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
+  if (portfolioMode) {
+    const { portfolioRequest } = await import("./portfolioDemo");
+    return portfolioRequest<T>(path, init);
+  }
   const response = await fetch(`${API}${path}`, init);
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
@@ -215,10 +222,10 @@ function MarketMetric({ kind }: { kind: "usdbrl" | "ibov" }) {
         .then((value) => active && setData(value))
         .catch(() => undefined);
     load();
-    const timer = window.setInterval(load, kind === "usdbrl" ? 120_000 : 60_000);
+    const timer = portfolioMode ? null : window.setInterval(load, kind === "usdbrl" ? 120_000 : 60_000);
     return () => {
       active = false;
-      window.clearInterval(timer);
+      if (timer) window.clearInterval(timer);
     };
   }, [kind]);
 
@@ -240,7 +247,7 @@ function MarketMetric({ kind }: { kind: "usdbrl" | "ibov" }) {
   return (
     <article className="market-metric">
       <div className="metric-topline">
-        <span>{kind === "usdbrl" ? "USD / BRL · PTAX" : "IBOV · spot"}</span>
+        <span>{kind === "usdbrl" ? `USD / BRL · ${portfolioMode ? "demo" : "PTAX"}` : `IBOV · ${portfolioMode ? "demo" : "spot"}`}</span>
         {data?.ok && (
           <span className={favorable ? "positive" : "negative"}>
             {change >= 0 ? "+" : ""}{change.toFixed(2)}%
@@ -322,14 +329,14 @@ function ExecutionTicket({
         </div>
 
         <div className="ticket-actions">
-          <a className={`primary-action ${!action ? "muted" : ""}`} href={brokerChoice.url} target="_blank" rel="noreferrer">
-            <span>{action ? `Abrir ${brokerChoice.name}` : "Ver cotação na corretora"}</span>
+          <a className={`primary-action ${!action ? "muted" : ""}`} href={portfolioMode ? REPOSITORY_URL : brokerChoice.url} target="_blank" rel="noreferrer">
+            <span>{portfolioMode ? "Explorar implementação" : action ? `Abrir ${brokerChoice.name}` : "Ver cotação na corretora"}</span>
             <span aria-hidden="true">↗</span>
           </a>
           {action && !entry.executed && (
             <button className="secondary-action" onClick={onMarkExecuted} disabled={marking}>
               {marking ? <Spinner /> : <span aria-hidden="true">✓</span>}
-              Marcar tranche executada
+              {portfolioMode ? "Simular execução" : "Marcar tranche executada"}
             </button>
           )}
           {entry.executed && <span className="filled-state">✓ Tranche registrada</span>}
@@ -338,8 +345,8 @@ function ExecutionTicket({
 
       <aside className="order-ticket" aria-label="Prévia da tranche">
         <div className="order-title">
-          <span>Ordem indicativa</span>
-          <span className={`order-state ${action ? "open" : "queued"}`}>{action ? "aberta" : "na fila"}</span>
+          <span>{portfolioMode ? "Ordem simulada" : "Ordem indicativa"}</span>
+          <span className={`order-state ${action ? "open" : "queued"}`}>{portfolioMode ? "demo" : action ? "aberta" : "na fila"}</span>
         </div>
         <label htmlFor="usd-balance">Saldo em USD</label>
         <div className="money-input">
@@ -373,7 +380,7 @@ function ExecutionTicket({
         >
           {BROKERS.map((item) => <option key={item.name}>{item.name}</option>)}
         </select>
-        <p className="order-disclaimer">Estimativa antes de spread, IOF e tarifas da corretora.</p>
+        <p className="order-disclaimer">{portfolioMode ? "Simulação local. Nenhuma ordem é enviada e nenhum valor é movimentado." : "Estimativa antes de spread, IOF e tarifas da corretora."}</p>
       </aside>
     </section>
   );
@@ -562,6 +569,18 @@ function Controls({ thresholds, onSave, saving }: { thresholds: Thresholds; onSa
 function Telegram({ status, onSave, onTest, busy }: { status: NotifierStatus; onSave: (token: string, chatId: string) => void; onTest: () => void; busy: boolean }) {
   const [token, setToken] = useState("");
   const [chatId, setChatId] = useState("");
+  if (portfolioMode) {
+    return (
+      <div className="view-stack compact-view">
+        <header className="page-intro"><span className="eyebrow">Portfolio simulation</span><h1>Telegram</h1><p>Uma prévia segura do canal de alertas, sem credenciais e sem chamadas externas.</p></header>
+        <section className="panel telegram-panel">
+          <div className="connection-state"><StatusDot on /><div><strong>Canal demonstrativo</strong><span>A integração real usa token mascarado, descoberta de chat e teste explícito.</span></div></div>
+          <div className="setup-note"><span>01</span><p>O backend guarda segredos fora do cliente e nunca os inclui no ledger.</p><span>02</span><p>Esta página estática simula apenas o feedback da operação no navegador.</p></div>
+          <div className="form-actions"><button className="primary-action compact" disabled={busy} onClick={onTest}>{busy ? <Spinner /> : null} Simular alerta</button><a className="secondary-action" href={REPOSITORY_URL} target="_blank" rel="noreferrer">Ver integração ↗</a></div>
+        </section>
+      </div>
+    );
+  }
   return (
     <div className="view-stack compact-view">
       <header className="page-intro"><span className="eyebrow">Alert channel</span><h1>Telegram</h1><p>Receba apenas movimentos relevantes e janelas de execução.</p></header>
@@ -615,7 +634,18 @@ function Cli() {
 }
 
 function LoadingView() {
-  return <div className="loading-view"><div className="loading-brand">CAMBIO</div><div className="loading-line" /><div className="loading-grid"><span /><span /><span /></div><p>Conectando ao feed de execução…</p></div>;
+  return <div className="loading-view"><img className="loading-mark" src={BRAND_MARK} alt="" /><div className="loading-brand">CAMBIO</div><div className="loading-line" /><div className="loading-grid"><span /><span /><span /></div><p>{portfolioMode ? "Preparando o case interativo…" : "Conectando ao feed de execução…"}</p></div>;
+}
+
+function PortfolioNotice() {
+  if (!portfolioMode) return null;
+  return (
+    <aside className="portfolio-notice" aria-label="Contexto da demonstração">
+      <span>Portfolio demo</span>
+      <p><strong>Case interativo, dados sintéticos.</strong> Explore a mesa inteira; alterações ficam somente neste navegador.</p>
+      <a href={REPOSITORY_URL} target="_blank" rel="noreferrer">Ver código <span aria-hidden="true">↗</span></a>
+    </aside>
+  );
 }
 
 export default function App() {
@@ -659,6 +689,7 @@ export default function App() {
 
   useEffect(() => {
     refresh();
+    if (portfolioMode) return undefined;
     const timer = window.setInterval(() => refresh(true), 30_000);
     return () => window.clearInterval(timer);
   }, [refresh]);
@@ -669,14 +700,14 @@ export default function App() {
       await fetchJson("/executions", { method: "POST" });
       await refresh(true);
       showToast({
-        message: "Tranche registrada. O relógio de quatro dias foi reiniciado.",
+        message: portfolioMode ? "Execução simulada. O relógio foi reiniciado apenas neste navegador." : "Tranche registrada. O relógio de quatro dias foi reiniciado.",
         tone: "success",
         action: {
           label: "Desfazer",
           run: async () => {
             await fetchJson("/executions/undo", { method: "POST" });
             await refresh(true);
-            showToast({ message: "Registro de execução desfeito." });
+            showToast({ message: portfolioMode ? "Simulação reiniciada." : "Registro de execução desfeito." });
           },
         },
       });
@@ -693,7 +724,7 @@ export default function App() {
       const result = await fetchJson<{ ok: boolean; thresholds: Thresholds }>("/thresholds", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(next) });
       setThresholds(result.thresholds);
       await refresh(true);
-      showToast({ message: "Política aplicada ao próximo ciclo.", tone: "success" });
+      showToast({ message: portfolioMode ? "Política simulada aplicada nesta sessão." : "Política aplicada ao próximo ciclo.", tone: "success" });
     } catch (cause) {
       showToast({ message: cause instanceof Error ? cause.message : "Falha ao aplicar a política.", tone: "error" });
     } finally {
@@ -718,7 +749,7 @@ export default function App() {
     setBusy("telegram");
     try {
       const result = await fetchJson<{ message?: string }>("/notifier/test", { method: "POST" });
-      showToast({ message: result.message || "Mensagem de teste enviada.", tone: "success" });
+      showToast({ message: result.message || (portfolioMode ? "Alerta simulado." : "Mensagem de teste enviada."), tone: "success" });
       await refresh(true);
     } catch (cause) {
       showToast({ message: cause instanceof Error ? cause.message : "Falha no teste.", tone: "error" });
@@ -743,28 +774,29 @@ export default function App() {
   return (
     <div className="app-shell">
       <aside className="rail">
-        <div className="brand"><span className="brand-mark">C</span><div><strong>cambio</strong><span>execution desk</span></div></div>
+        <div className="brand"><img className="brand-mark" src={BRAND_MARK} alt="" /><div><strong>cambio</strong><span>{portfolioMode ? "portfolio case" : "execution desk"}</span></div></div>
         <nav aria-label="Navegação principal">
           {navigation.map((item) => <button key={item.id} className={tab === item.id ? "active" : ""} onClick={() => setTab(item.id)}><i>{item.glyph}</i><span>{item.label}</span>{item.id === "alerts" && dashboard?.total_alerts ? <b>{dashboard.total_alerts}</b> : null}</button>)}
         </nav>
         <div className="rail-status">
-          <div><StatusDot on={Boolean(health?.healthy)} /><span>{health?.healthy ? "Feed operacional" : "Feed indisponível"}</span></div>
-          <small>{health ? `uptime ${Math.floor(health.uptime_seconds / 3600)}h ${Math.floor((health.uptime_seconds % 3600) / 60)}m` : "sem telemetria"}</small>
+          <div><StatusDot on={Boolean(health?.healthy)} /><span>{portfolioMode ? "Demo local" : health?.healthy ? "Feed operacional" : "Feed indisponível"}</span></div>
+          <small>{portfolioMode ? "sem backend · sem ordens" : health ? `uptime ${Math.floor(health.uptime_seconds / 3600)}h ${Math.floor((health.uptime_seconds % 3600) / 60)}m` : "sem telemetria"}</small>
         </div>
       </aside>
 
       <main className="workspace">
         <header className="workspace-bar">
-          <div><span className="eyebrow">USD / BRL · mandato pessoal</span><h1>{activeTitle}</h1></div>
+          <div><span className="eyebrow">USD / BRL · {portfolioMode ? "engineering case study" : "mandato pessoal"}</span><h1>{activeTitle}</h1></div>
           <div className="workspace-live">
-            {latest && <><span>último tick</span><strong>{fmtRate(latest.rate_live || latest.rate_signal)}</strong><DecisionBadge entry={latest} /></>}
-            <div className="live-feed"><StatusDot on={Boolean(health?.healthy)} /><span>live</span></div>
+            {latest && <><span>{portfolioMode ? "snapshot" : "último tick"}</span><strong>{fmtRate(latest.rate_live || latest.rate_signal)}</strong><DecisionBadge entry={latest} /></>}
+            <div className="live-feed"><StatusDot on={Boolean(health?.healthy)} /><span>{portfolioMode ? "simulação" : "live"}</span></div>
           </div>
         </header>
 
         {error && <div className="error-banner"><div><strong>O feed não respondeu</strong><span>{error}</span></div><button onClick={() => refresh()}>Tentar novamente</button></div>}
 
         <div className="workspace-content">
+          <PortfolioNotice />
           {tab === "desk" && dashboard && <Desk data={dashboard} onMarkExecuted={markExecuted} marking={busy === "execution"} />}
           {tab === "ledger" && <div className="view-stack"><header className="page-intro"><span className="eyebrow">Audit trail</span><h1>Ledger de decisões</h1><p>Cada observação, gatilho e execução em uma trilha verificável.</p></header><Blotter entries={journal} /></div>}
           {tab === "alerts" && <div className="view-stack"><header className="page-intro"><span className="eyebrow">Exception queue</span><h1>Alertas</h1><p>Somente eventos que pediram atenção ou abriram uma janela.</p></header><Blotter entries={journal.filter((entry) => entry.notified || entry.decision === "exchange_now")} /></div>}

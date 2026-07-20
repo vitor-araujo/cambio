@@ -5,7 +5,10 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:portfolio": "vite --mode portfolio",
     "build": "tsc -b && vite build",
+    "build:portfolio": "tsc -b && vite build --mode portfolio",
+    "preview:portfolio": "vite preview",
     "preview": "vite preview"
   },
   "dependencies": {
